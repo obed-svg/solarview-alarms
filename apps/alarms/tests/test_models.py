@@ -16,9 +16,9 @@ from apps.plants.models import Project
 
 def make_rule(**kwargs) -> AlarmRule:
     defaults = {
-        "code": "weather_comm_lost",
-        "name": "Estación meteorológica sin comunicación",
-        "description": "No llegan datos meteorológicos.",
+        "code": "test_rule",  # código propio: el seed de la migración 0002 ya crea los reales
+        "name": "Regla de prueba",
+        "description": "Solo para tests de modelo.",
         "category": Category.WEATHER,
         "component_type": ComponentType.WEATHER_STATION,
         "default_severity": Severity.HIGH,
