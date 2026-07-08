@@ -1,0 +1,25 @@
+{
+  "message": "OK",
+  "error": null,
+  "results": {
+    "time": "2026-07-08 16:12:34",
+    "i_a": 34,
+    "i_b": 34,
+    "i_c": 34,
+    "i_n": 0,
+    "u_a": 0,
+    "u_b": 0,
+    "u_c": 0,
+    "u_r": 0,
+    "u_s": 0,
+    "u_t": 0,
+    "f_abc": 59.98,
+    "kva": 1,
+    "kw": 1,
+    "pf": 0,
+    "v_three_phase": 0,
+    "p_three_phase": 0,
+    "active": null
+  },
+  "success": true
+}

@@ -1,0 +1,17 @@
+{
+  "message": "OK",
+  "error": null,
+  "results": {
+    "id": 146,
+    "name": "Minigranja 0015 - El Son",
+    "lon": -73.213694,
+    "lat": 10.417686,
+    "plant_code": "NE=35516598",
+    "weather_plant_code": "NE=35522602",
+    "is_minifarm": true,
+    "is_self_consumption": false,
+    "installed_capacity": 1339.56,
+    "location": "Valledupar"
+  },
+  "success": true
+}

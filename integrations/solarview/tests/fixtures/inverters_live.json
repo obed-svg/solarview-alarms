@@ -1,0 +1,52 @@
+{
+  "message": "OK",
+  "error": null,
+  "results": [
+    {
+      "id": 1571,
+      "dev_name": "300KTL-Inversor1",
+      "state": "Grid-connected",
+      "power": 248.721,
+      "efficiency": 98.27,
+      "temperature": 66.9,
+      "time": "2026-07-08 16:10:04"
+    },
+    {
+      "id": 1575,
+      "dev_name": "300KTL-Inversor2",
+      "state": "Grid-connected",
+      "power": 247.006,
+      "efficiency": 98.34,
+      "temperature": 68.2,
+      "time": "2026-07-08 16:10:04"
+    },
+    {
+      "id": 1570,
+      "dev_name": "300KTL-Inversor3",
+      "state": "Grid-connected",
+      "power": 249.613,
+      "efficiency": 98.2,
+      "temperature": 66.7,
+      "time": "2026-07-08 16:10:04"
+    },
+    {
+      "id": 1573,
+      "dev_name": "40KTL-Inversor5",
+      "state": "Grid-connected",
+      "power": 41.063,
+      "efficiency": 97.92,
+      "temperature": 78.1,
+      "time": "2026-07-08 16:10:04"
+    },
+    {
+      "id": 1574,
+      "dev_name": "50KTL-Inversor4",
+      "state": "Grid-connected",
+      "power": 25.17,
+      "efficiency": 98.02,
+      "temperature": 64.3,
+      "time": "2026-07-08 16:10:04"
+    }
+  ],
+  "success": true
+}

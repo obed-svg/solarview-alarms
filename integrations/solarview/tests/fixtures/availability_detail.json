@@ -1,0 +1,73 @@
+{
+  "message": "OK",
+  "error": null,
+  "results": {
+    "availability": 89.02,
+    "project": 146,
+    "time": "2026-07-08T16:00:14.872651-05:00",
+    "inverters_availability": {
+      "300KTL-Inversor1": {
+        "availability": 87.5,
+        "pv4": {
+          "cs4": 6.79,
+          "vs4": 1110.2
+        },
+        "pv6": {
+          "cs6": 6.04,
+          "vs6": 1108.0
+        },
+        "pv7": {
+          "cs7": 6.42,
+          "vs7": 1108.0
+        },
+        "available": 21,
+        "not_available": 3
+      },
+      "40KTL-Inversor5": {
+        "availability": 100.0,
+        "available": 4,
+        "not_available": 0
+      },
+      "300KTL-Inversor3": {
+        "availability": 95.83333333333334,
+        "pv8": {
+          "cs8": 0.0,
+          "vs8": 1092.8
+        },
+        "available": 23,
+        "not_available": 1
+      },
+      "50KTL-Inversor4": {
+        "availability": 66.66666666666666,
+        "pv2": {
+          "cs2": 0.0,
+          "vs2": 713.3
+        },
+        "pv8": {
+          "cs8": 0.0,
+          "vs8": 703.9
+        },
+        "available": 4,
+        "not_available": 2
+      },
+      "300KTL-Inversor2": {
+        "availability": 87.5,
+        "pv4": {
+          "cs4": 5.91,
+          "vs4": 1100.1
+        },
+        "pv6": {
+          "cs6": 5.98,
+          "vs6": 1115.7
+        },
+        "pv7": {
+          "cs7": 6.24,
+          "vs7": 1115.7
+        },
+        "available": 21,
+        "not_available": 3
+      }
+    }
+  },
+  "success": true
+}
