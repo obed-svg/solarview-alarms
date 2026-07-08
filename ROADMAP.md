@@ -15,7 +15,7 @@ Reglas de ejecución (para cada iteración del loop):
 ## Estado: EN PROGRESO
 
 - [x] T01 Scaffolding: proyecto Django `config/` + settings (base/dev/prod con django-environ) + docker-compose (postgres:16, redis:7) + pyproject + pytest-django/ruff + healthcheck
-- [ ] T02 `config/celery.py`: app Celery, colas (evaluation, notifications, sync), django-celery-beat
+- [x] T02 `config/celery.py`: app Celery, colas (evaluation, notifications, sync), django-celery-beat
 - [ ] T03 SONDEO APIs reales: scripts en `scripts/probe/` que consultan `/monitoring/` con `static_token`, graban responses reales como fixtures JSON en `integrations/solarview/tests/fixtures/`, documentan en Notas: formato de timestamps, cadencia real de weather/quoia por proyecto, códigos de `state` del inversor (¿distingue derating/aislamiento?), estructura de measurements-dc. GATE: lo aprendido ajusta params por defecto y puede mover tareas a Bloqueadas.
 - [ ] T04 Cliente SolarView base: `integrations/solarview/client.py` (`/monitoring/`, envelope success/error, excepciones SolarViewAPIError/Timeout/AuthError, retries 429/5xx, timeout (5,30)) + tests con fixtures reales
 - [ ] T05 Cliente SolarView: un método por endpoint + dataclasses en `schemas.py`
@@ -44,4 +44,5 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T02: task_routes por módulo (`apps.alarms.tasks.*`→evaluation, `apps.notifications.tasks.*`→notifications, `apps.plants.tasks.*`→sync) — los tasks futuros DEBEN vivir en esos módulos para caer en su cola. Soft time limit global 240s. Beat = DatabaseScheduler (schedules editables en admin; los defaults se seedearán cuando existan los tasks).
 - T01: venv en `.venv/` (python 3.12, sin uv). `pip install -e ".[dev]"`. Tests con `config.settings.test` (sqlite in-memory, CELERY_TASK_ALWAYS_EAGER). Settings leen `.env` vía django-environ: llaves `static_token`, `webhook_discord`, opcionales `SOLARVIEW_BASE_URL`, `DATABASE_URL`, `REDIS_URL`. docker-compose expone postgres 5432 y redis 6379.
