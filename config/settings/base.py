@@ -78,8 +78,17 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Celery
+# Cache Redis: requerido por los locks anti-solape de evaluate_project
+# (LocMemCache no sirve: cada worker tendría su propio lock)
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    },
+}
+
+# Celery
 CELERY_BROKER_URL = REDIS_URL
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
