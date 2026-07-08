@@ -31,7 +31,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T15 Reglas comunicación: 4 `inverter_comm_lost`, 8 `meter_comm_lost`
 - [x] T16 Reglas calidad datos: 11 `pr_inputs_missing` (sin T_mod), 12 `availability_inputs_missing`, 13 `data_frozen`, 15 `poa_invalid`
 - [x] T17 Reglas inversor/strings: 2 `inverter_unavailable`, 3 `inverter_derating`, 5 `string_zero_current`, 6 `string_low_current`, 7 `dc_isolation_low`
-- [ ] T18 Reglas medidores: 9 `meter_no_increment`, 10 `meter_inverter_mismatch` (grupo hourly + escalamiento 3%/5%). ⚠️ quoia roto server-side (ver Notas T03): si sigue roto al llegar aquí, mover 8/9/10 a Bloqueadas.
+- [x] T18 Reglas medidores: 9 `meter_no_increment`, 10 `meter_inverter_mismatch` (grupo hourly + escalamiento 3%/5%). Implementadas contra la forma documentada del payload; quoia sigue 500 (re-verificado en 3 proyectos) → validación real pendiente en Bloqueadas.
 - [ ] T19 Reglas red/calidad: 17 `recloser_open`, 18 `power_factor_low` (+ stubs 16, 19 disabled)
 - [ ] T20 `check_sla` (regla 20 `alarm_sla_breach`) + escalamiento
 - [ ] T21 Hardening: locks Redis anti-solape, EvaluationRun como dashboard en admin, tuning colas
@@ -39,6 +39,9 @@ Reglas de ejecución (para cada iteración del loop):
 ## Bloqueadas
 
 (si una tarea falla 2 intentos o requiere decisión humana, va aquí con diagnóstico)
+
+- **Validar reglas 8/9/10 contra quoia real**: `/quoia_measurements_history/` devuelve 500 en TODOS los proyectos (bugs backend: `ProjectInfo matching query does not exist` y `cannot access local variable 'updated_node'`). Las 3 reglas están implementadas contra la doc y viven en not_computable (sin ruido) mientras tanto. Acción humana: reportar al equipo del backend; al arreglarse, sondear payload real y ajustar `_frontier_delta_kwh` si la forma difiere.
+- **Códigos de `state` del inversor para reglas 3 y 7**: solo se ha observado "Grid-connected". DERATING_KEYWORDS/ISOLATION_KEYWORDS son tentativos. Acción humana: pedir al backend el vocabulario completo de estados (¿expone derating/aislamiento?) o capturar states durante una falla real.
 
 ## Notas entre iteraciones
 
