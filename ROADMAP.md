@@ -17,7 +17,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T01 Scaffolding: proyecto Django `config/` + settings (base/dev/prod con django-environ) + docker-compose (postgres:16, redis:7) + pyproject + pytest-django/ruff + healthcheck
 - [x] T02 `config/celery.py`: app Celery, colas (evaluation, notifications, sync), django-celery-beat
 - [x] T03 SONDEO APIs reales: scripts en `scripts/probe/` que consultan `/monitoring/` con `static_token`, graban responses reales como fixtures JSON en `integrations/solarview/tests/fixtures/`, documentan en Notas: formato de timestamps, cadencia real de weather/quoia por proyecto, códigos de `state` del inversor (¿distingue derating/aislamiento?), estructura de measurements-dc. GATE: lo aprendido ajusta params por defecto y puede mover tareas a Bloqueadas.
-- [ ] T04 Cliente SolarView base: `integrations/solarview/client.py` (`/monitoring/`, envelope success/error, excepciones SolarViewAPIError/Timeout/AuthError, retries 429/5xx, timeout (5,30)) + tests con fixtures reales
+- [x] T04 Cliente SolarView base: `integrations/solarview/client.py` (`/monitoring/`, envelope success/error, excepciones SolarViewAPIError/Timeout/AuthError, retries 429/5xx, timeout (5,30)) + tests con fixtures reales
 - [ ] T05 Cliente SolarView: un método por endpoint + dataclasses en `schemas.py`
 - [ ] T06 App `plants`: modelos Project/Inverter/MaintenanceWindow + migraciones + admin
 - [ ] T07 `plants.sync_catalog`: task Celery de upsert por external_id (primer e2e)
@@ -44,6 +44,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T04: `SolarViewClient.get()` devuelve `results` si hay envelope, o el body crudo si no (p.ej. `/generation/` NO usa envelope). 404 con `success=false` → `SolarViewNotAssociated` (equipo no existe en el proyecto, no reintentar). 401/403 → `SolarViewAuthError`. Retries agotados → `SolarViewAPIError` (urllib3 lanza RetryError, mapeado). `from_settings()` importa Django lazy — el paquete sigue siendo usable sin Django. Settings ahora leen `SOLARSOLARVIEW_BASE_URL` con fallback a `SOLARVIEW_BASE_URL`.
 - T03 (SONDEO, proyectos 121 y 146; 77 proyectos visibles con el token):
   - **Auth**: `Authorization: Token <static_token>`. Llave real del .env para la URL: `SOLARSOLARVIEW_BASE_URL` (sin esquema — anteponer `https://`).
   - **`state` del inversor es STRING legible** ("Grid-connected"), NO código numérico como decía la doc. Solo se observó ese valor → los códigos de derating/aislamiento (reglas 3 y 7) siguen sin conocerse; descubrirlos cuando haya un inversor en falla o preguntar al equipo del backend.

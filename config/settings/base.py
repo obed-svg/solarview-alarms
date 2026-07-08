@@ -83,7 +83,10 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TASK_SOFT_TIME_LIMIT = 240
 CELERY_TASK_TIME_LIMIT = 300
 
-# SolarView API externa (secretos leídos del .env en runtime)
-SOLARVIEW_BASE_URL = env("SOLARVIEW_BASE_URL", default="")
+# SolarView API externa (secretos leídos del .env en runtime).
+# La llave real en el .env actual es SOLARSOLARVIEW_BASE_URL (sic).
+SOLARVIEW_BASE_URL = env(
+    "SOLARSOLARVIEW_BASE_URL", default=env("SOLARVIEW_BASE_URL", default="")
+)
 SOLARVIEW_STATIC_TOKEN = env("static_token", default="")
 WEBHOOK_DISCORD = env("webhook_discord", default="")
