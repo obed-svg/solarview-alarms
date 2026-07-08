@@ -19,7 +19,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T03 SONDEO APIs reales: scripts en `scripts/probe/` que consultan `/monitoring/` con `static_token`, graban responses reales como fixtures JSON en `integrations/solarview/tests/fixtures/`, documentan en Notas: formato de timestamps, cadencia real de weather/quoia por proyecto, códigos de `state` del inversor (¿distingue derating/aislamiento?), estructura de measurements-dc. GATE: lo aprendido ajusta params por defecto y puede mover tareas a Bloqueadas.
 - [x] T04 Cliente SolarView base: `integrations/solarview/client.py` (`/monitoring/`, envelope success/error, excepciones SolarViewAPIError/Timeout/AuthError, retries 429/5xx, timeout (5,30)) + tests con fixtures reales
 - [x] T05 Cliente SolarView: un método por endpoint + dataclasses en `schemas.py`
-- [ ] T06 App `plants`: modelos Project/Inverter/MaintenanceWindow + migraciones + admin
+- [x] T06 App `plants`: modelos Project/Inverter/MaintenanceWindow + migraciones + admin
 - [ ] T07 `plants.sync_catalog`: task Celery de upsert por external_id (primer e2e)
 - [ ] T08 Modelos `alarms`: AlarmRule, RuleConfig, Alarm (dedup_key + partial unique constraint), NonComputableInterval, EvaluationRun + migraciones + admin
 - [ ] T09 Data migration seed: 20 AlarmRule con params COX (reglas 16 T_mod y 19 THD con enabled=False)
@@ -44,6 +44,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T06: `MaintenanceWindow.objects.active_at(project, at, inverter=None)`: sin inverter devuelve SOLO ventanas de proyecto completo; con inverter devuelve las suyas + las de proyecto. Semántica pensada para `ctx.in_maintenance()`. Migraciones generadas con `DJANGO_SETTINGS_MODULE=config.settings.test` (no requiere postgres corriendo).
 - T05: timestamps se parsean a `datetime` NAIVE hora local (America/Bogota) en `schemas.parse_ts` — formatos `%Y-%m-%d %H:%M:%S`, `%Y-%m-%d %H:%M`, `%Y-%m-%d`. `TimeSeries = dict[datetime, float|None]` (None = inversor sin reporte, común de noche). Métodos tipados: list_projects, project_inverters, project_power, project_weather, relay_now, relay_historical, quoia_history, generation, measurements_dc, project_measurement, availability_detail. Usar `weather.irradiation_poa` para POA.
 - T04: `SolarViewClient.get()` devuelve `results` si hay envelope, o el body crudo si no (p.ej. `/generation/` NO usa envelope). 404 con `success=false` → `SolarViewNotAssociated` (equipo no existe en el proyecto, no reintentar). 401/403 → `SolarViewAuthError`. Retries agotados → `SolarViewAPIError` (urllib3 lanza RetryError, mapeado). `from_settings()` importa Django lazy — el paquete sigue siendo usable sin Django. Settings ahora leen `SOLARSOLARVIEW_BASE_URL` con fallback a `SOLARVIEW_BASE_URL`.
 - T03 (SONDEO, proyectos 121 y 146; 77 proyectos visibles con el token):
