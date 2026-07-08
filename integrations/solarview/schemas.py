@@ -25,6 +25,16 @@ def parse_ts(value: str | None) -> datetime | None:
     return None
 
 
+def as_float(value) -> float | None:
+    """Coerción segura: la API devuelve strings como "Desconocida" en campos numéricos."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_series(raw: dict | None) -> TimeSeries:
     """Convierte {"2026-07-08 10:00": 12.5, ...} en {datetime: float|None}."""
     series: TimeSeries = {}
@@ -54,13 +64,13 @@ class ProjectInfo:
         return cls(
             id=data["id"],
             name=data.get("name", ""),
-            lon=data.get("lon"),
-            lat=data.get("lat"),
+            lon=as_float(data.get("lon")),
+            lat=as_float(data.get("lat")),
             plant_code=data.get("plant_code"),
             weather_plant_code=data.get("weather_plant_code"),
             is_minifarm=bool(data.get("is_minifarm")),
             is_self_consumption=bool(data.get("is_self_consumption")),
-            installed_capacity=data.get("installed_capacity"),
+            installed_capacity=as_float(data.get("installed_capacity")),
             location=data.get("location"),
             raw=data,
         )

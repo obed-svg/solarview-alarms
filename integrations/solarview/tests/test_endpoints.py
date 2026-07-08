@@ -42,6 +42,22 @@ class TestParseTs:
 
 class TestListProjects:
     @responses.activate
+    def test_dirty_numeric_fields_become_none(self):
+        # visto en la API real: installed_capacity = "Desconocida"
+        body = fixture("project_list")
+        results = body["results"]
+        data = results["data"] if isinstance(results, dict) and "data" in results else results
+        data[0]["installed_capacity"] = "Desconocida"
+        data[0]["lat"] = ""
+        responses.get(f"{BASE}/monitoring/project/", json=body)
+
+        first = make_client().list_projects()[0]
+
+        assert first.installed_capacity is None
+        assert first.lat is None
+
+
+    @responses.activate
     def test_parses_projects_from_real_fixture(self):
         responses.get(f"{BASE}/monitoring/project/", json=fixture("project_list"))
 
