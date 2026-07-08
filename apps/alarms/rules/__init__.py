@@ -1,1 +1,1 @@
-from . import communication, project  # noqa: F401  (importa para ejecutar @register)
+from . import communication, data_quality, project  # noqa: F401  (ejecuta @register)
