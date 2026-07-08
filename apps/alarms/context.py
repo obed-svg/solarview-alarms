@@ -136,17 +136,26 @@ class EvaluationContext:
         producción), así que las reglas sensibles al anochecer usan margen."""
         at = at or self.now
         margin = timedelta(minutes=margin_minutes)
-        if self.project.latitude is None or self.project.longitude is None:
+
+        def fixed_window() -> bool:
             start = at.replace(hour=6, minute=0, second=0, microsecond=0) + margin
             end = at.replace(hour=18, minute=0, second=0, microsecond=0) - margin
             return start <= at < end
+
+        if self.project.latitude is None or self.project.longitude is None:
+            return fixed_window()
         from astral import LocationInfo
         from astral.sun import sun
 
         location = LocationInfo(
             latitude=float(self.project.latitude), longitude=float(self.project.longitude)
         )
-        times = sun(location.observer, date=at.date(), tzinfo=self.tz)
+        try:
+            times = sun(location.observer, date=at.date(), tzinfo=self.tz)
+        except ValueError:
+            # coordenadas basura (visto: proyecto con lat/lon invertidas por la
+            # API → "lat -75" = Antártida y astral explota). Fallback horario fijo.
+            return fixed_window()
         aware = at.replace(tzinfo=self.tz)
         return times["sunrise"] + margin <= aware <= times["sunset"] - margin
 

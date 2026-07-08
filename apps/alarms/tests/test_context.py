@@ -103,6 +103,18 @@ class TestHelpers:
         )
         assert ctx_night.is_solar_hours() is False
 
+    def test_garbage_coordinates_fall_back_to_fixed_window(self):
+        # visto en producción: la API entrega lat/lon INVERTIDAS (lat=-75 = Antártida)
+        # y astral lanza ValueError ("Sun never reaches 6 degrees below the horizon")
+        project = Project.objects.create(
+            external_id=151, name="deprecated", latitude=-75.199598, longitude=10.583292,
+            synced_at=timezone.now(),
+        )
+        ctx = make_ctx(project=project, now=datetime(2026, 7, 8, 12, 0))
+
+        assert ctx.is_solar_hours() is True  # mediodía en ventana fija, sin explotar
+        assert ctx.is_solar_hours(margin_minutes=45) is True
+
     def test_in_maintenance_uses_windows(self):
         project = make_project()
         MaintenanceWindow.objects.create(
