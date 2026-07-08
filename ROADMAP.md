@@ -41,10 +41,11 @@ Reglas de ejecución (para cada iteración del loop):
 (si una tarea falla 2 intentos o requiere decisión humana, va aquí con diagnóstico)
 
 - **Validar reglas 8/9/10 contra quoia real**: `/quoia_measurements_history/` devuelve 500 en TODOS los proyectos (bugs backend: `ProjectInfo matching query does not exist` y `cannot access local variable 'updated_node'`). Las 3 reglas están implementadas contra la doc y viven en not_computable (sin ruido) mientras tanto. Acción humana: reportar al equipo del backend; al arreglarse, sondear payload real y ajustar `_frontier_delta_kwh` si la forma difiere.
-- **Códigos de `state` del inversor para reglas 3 y 7**: solo se ha observado "Grid-connected". DERATING_KEYWORDS/ISOLATION_KEYWORDS son tentativos. Acción humana: pedir al backend el vocabulario completo de estados (¿expone derating/aislamiento?) o capturar states durante una falla real.
+- **Códigos de `state` del inversor para reglas 3 y 7**: formato confirmado en producción: `"Modo: detalle"` (visto "Grid-connected" y "Standby: insulation resistance detecting" = auto-test rutinario, NO falla — regla 7 ahora exige calificador low/fault/abnormal). Sigue pendiente: vocabulario de DERATING real para regla 3.
 
 ## Post-COMPLETADO
 
+- [x] T24 (2026-07-08): primer state de falla real capturado ("Standby: insulation resistance detecting") reveló que era auto-test, no falla → regla 7 exige calificador (low/fault/abnormal/fail). Regla 6 ahora exige baseline comparable ≥ comparable_min_current_a (goteo de 0.1 A al atardecer no es string degradado). De 129 alarmas iniciales quedaron 2 legítimas tras los 3 ajustes anti-ruido.
 - [x] T23 (2026-07-08): auditoría al anochecer detectó ola nocturna (~47 inverter_comm_lost + cascada a las 17:54 por inversores durmiéndose, y 73 pr_inputs_missing con flap en el borde del ocaso + quoia devolviendo 200-vacío en muchos proyectos). Fix: `ctx.is_solar_hours(margin_minutes=N)`; reglas 4 y 12 devuelven [] fuera de [amanecer+45, ocaso-45]; regla 11 exige ventana horaria completamente diurna (margen 30). Params en migración 0005. Las 193 alarmas de la ola se resolvieron en lote (sin notificación: update masivo no pasa por dispatcher).
 - [x] T22 (2026-07-08): T_mod definido por el usuario = `temperature_POA` (temperatura del panel). Regla 16 `tmod_invalid` implementada (missing/frozen/out_of_range/incoherent_vs_ambient, solo horario solar, sin estación no aplica) + habilitada por migración 0004; regla 11 ahora exige T_mod cuando el proyecto tiene estación. 19/20 reglas activas (solo THD disabled).
 

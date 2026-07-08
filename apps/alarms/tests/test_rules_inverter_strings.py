@@ -191,14 +191,35 @@ class TestStringLowCurrent:
 
 @pytest.mark.django_db
 class TestDcIsolationLow:
-    def test_isolation_state_fires(self, project):
+    def test_isolation_fault_state_fires(self, project):
         ctx = make_ctx(project, [live(1, "INV-1", state="Insulation resistance low")])
 
         outcomes = DcIsolationLow().evaluate(ctx)
 
         assert outcomes[0].status == "firing"
 
+    def test_routine_insulation_selftest_does_not_fire(self, project):
+        # state real visto en producción: auto-test matinal, NO es falla
+        ctx = make_ctx(
+            project, [live(1, "INV-1", state="Standby: insulation resistance detecting")]
+        )
+
+        assert DcIsolationLow().evaluate(ctx)[0].status == "ok"
+
     def test_normal_state_ok(self, project):
         ctx = make_ctx(project, [live(1, "INV-1")])
 
         assert DcIsolationLow().evaluate(ctx)[0].status == "ok"
+
+
+@pytest.mark.django_db
+class TestStringLowCurrentBaseline:
+    def test_trickle_currents_do_not_compare(self, project):
+        # goteo del atardecer: 0.11 vs 0.17 A no es string degradado
+        dc = {"INV-1": {"cs1": series(0.11), "cs2": series(0.17), "cs3": series(0.18)}}
+        ctx = make_ctx(project, [live(1, "INV-1")], dc=dc)
+
+        outcomes = {o.dedup_suffix: o for o in StringLowCurrent().evaluate(ctx)}
+
+        assert outcomes["inv:1:cs1"].status == "ok"
+        assert outcomes["inv:1:cs1"].reason == "excluded:baseline_insignificante"

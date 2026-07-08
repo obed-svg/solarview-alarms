@@ -5,7 +5,11 @@ from apps.alarms.context import Unavailable
 from .base import BaseRule, RuleOutcome, register
 from .helpers import dev_name_to_external_id, poa_sustained_above, window_average
 
+# El state real es "Modo: detalle" (visto: "Standby: insulation resistance
+# detecting" = AUTO-TEST rutinario, no falla). Solo es falla si el texto de
+# aislamiento viene acompañado de un calificador de problema.
 ISOLATION_KEYWORDS = ("isolat", "insulat", "aislam")
+FAULT_QUALIFIERS = ("low", "fault", "abnormal", "fail", "baja", "falla")
 
 
 def _string_averages(ctx, dc_by_inverter, params) -> dict[str, dict[str, float]]:
@@ -135,6 +139,16 @@ class StringLowCurrent(_StringRuleBase):
             ]
         siblings_avg = sum(siblings) / len(siblings)
 
+        # comparables con corriente insignificante (goteo del atardecer/amanecer)
+        # no sirven de línea base: 0.11 vs 0.17 A no es un string degradado
+        min_baseline = ctx.params("string_zero_current")["comparable_min_current_a"]
+        if siblings_avg < min_baseline:
+            return [
+                RuleOutcome(status="ok", dedup_suffix=suffix,
+                            inverter_external_id=ext_id, component_id=cs_name,
+                            reason="excluded:baseline_insignificante")
+            ]
+
         if avg < params["low_ratio"] * siblings_avg:
             return [
                 RuleOutcome(
@@ -172,7 +186,9 @@ class DcIsolationLow(BaseRule):
         for inv in inverters:
             state = (inv.state or "").lower()
             suffix = f"inv:{inv.id}"
-            if any(kw in state for kw in ISOLATION_KEYWORDS):
+            mentions_isolation = any(kw in state for kw in ISOLATION_KEYWORDS)
+            is_fault = mentions_isolation and any(q in state for q in FAULT_QUALIFIERS)
+            if is_fault:
                 outcomes.append(
                     RuleOutcome(
                         status="firing", dedup_suffix=suffix,
