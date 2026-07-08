@@ -33,7 +33,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T17 Reglas inversor/strings: 2 `inverter_unavailable`, 3 `inverter_derating`, 5 `string_zero_current`, 6 `string_low_current`, 7 `dc_isolation_low`
 - [x] T18 Reglas medidores: 9 `meter_no_increment`, 10 `meter_inverter_mismatch` (grupo hourly + escalamiento 3%/5%). Implementadas contra la forma documentada del payload; quoia sigue 500 (re-verificado en 3 proyectos) → validación real pendiente en Bloqueadas.
 - [x] T19 Reglas red/calidad: 17 `recloser_open`, 18 `power_factor_low` (+ stubs 16, 19 disabled)
-- [ ] T20 `check_sla` (regla 20 `alarm_sla_breach`) + escalamiento
+- [x] T20 `check_sla` (regla 20 `alarm_sla_breach`) + escalamiento
 - [ ] T21 Hardening: locks Redis anti-solape, EvaluationRun como dashboard en admin, tuning colas
 
 ## Bloqueadas
@@ -47,6 +47,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T20: `check_sla` reusa `_process_outcome` del engine (upsert/dedup/notify idénticos). Dedup del breach: `alarm_sla_breach:{ext_id}:alarm:{source_id}` — el source_id se recupera del dedup_key al resolver. SLA solo sobre ACTIVE (ack detiene el reloj). Breaches excluidos del scan (sin recursión). Escala a critical al superar sla × escalate_after_multiplier.
 - T19: `validate_registry()` ahora vacío (test lo garantiza): las 19 reglas de engine tienen clase; stubs 16/19 devuelven [] y siguen disabled en seed. `recloser_open`: apertura en ventana de mantenimiento = programada (ok); active=null → not_computable. `power_factor_low`: usa abs(pf) (pf puede venir con signo según dirección del flujo).
 - T17: persistencia de `inverter_unavailable` verificada con corrientes DC (cadencia 5 min), no con power live instantáneo. "Todos caídos" → ok excluded (lo cubre project_no_generation); "todas las strings en 0" → ok (nivel inversor, no string). Reglas 3 y 7 dependen de KEYWORDS sobre `state` (DERATING_KEYWORDS/ISOLATION_KEYWORDS en inverter.py/strings.py) — solo se ha visto "Grid-connected"; ampliar keywords cuando aparezcan estados de falla reales o el backend confirme el vocabulario. `rules/helpers.py`: poa_sustained_above (tri-valor True/False/None), window_average, dev_name→external_id.
 - T16: "3 intervalos consecutivos" interpretado como frozen_intervals × 15 min (intervalo IEC), NO 3 puntos de cadencia cruda. Congelado = max-min < 1e-6 con ≥3 puntos. data_frozen NO evalúa POA (evita duplicar poa_invalid); potencia 0 constante tampoco cuenta (la cubre project_no_generation). Reglas 11/12 ESCRIBEN NonComputableInterval con get_or_create + floor (60min pr, 15min availability) — idempotente entre ticks. Regla 11 no aplica sin medidor quoia (sin frontera no hay PR contractual). PoaInvalid con POA=0 + generación usa umbral fijo 5 kW.
