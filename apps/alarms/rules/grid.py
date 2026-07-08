@@ -3,6 +3,7 @@
 from apps.alarms.context import Unavailable
 
 from .base import BaseRule, RuleOutcome, register
+from .relay_normalize import normalize_relay
 
 
 @register
@@ -65,26 +66,51 @@ class PowerFactorLow(BaseRule):
             return [RuleOutcome(status="not_computable", reason=f"relay:{relay.reason}")]
 
         # FP solo es representativo cuando la planta genera: de noche solo hay
-        # consumo auxiliar con FP naturalmente malo. Doble protección junto con
-        # min_load_kw (que además depende de la unidad real del relay, ver T25).
+        # consumo auxiliar con FP naturalmente malo.
         if not ctx.is_solar_hours():
             return [RuleOutcome(status="ok", reason="excluded:night")]
 
         params = ctx.params(self.code)
 
-        if relay.kw is None or relay.kw < params["min_load_kw"]:
+        # normalización de unidades (cada marca de reconectador reporta distinto):
+        # ancla 1 = capacidad instalada; ancla 2 = potencia de inversores
+        inverter_total = None
+        inverters = ctx.inverters_live()
+        if not isinstance(inverters, Unavailable):
+            inverter_total = sum(inv.power or 0 for inv in inverters)
+        normalized = normalize_relay(
+            relay,
+            capacity_kw=float(ctx.project.installed_capacity_kw or 0) or None,
+            inverter_total_kw=inverter_total,
+        )
+
+        if normalized.kw is None:
+            # unidad irresoluble; pero si BAJO CUALQUIER escala candidata la
+            # carga queda bajo el umbral, la decisión es la misma: baja carga
+            from .relay_normalize import KW_SCALES
+
+            if relay.kw is not None and all(
+                relay.kw * s < params["min_load_kw"] for s in KW_SCALES
+            ):
+                return [RuleOutcome(status="ok", reason="excluded:low_load")]
+            return [
+                RuleOutcome(status="not_computable", reason="relay:unidad_kw_ambigua")
+            ]
+        if normalized.kw < params["min_load_kw"]:
             return [RuleOutcome(status="ok", reason="excluded:low_load")]
-        if relay.pf is None:
+        if normalized.pf is None:
             return [RuleOutcome(status="not_computable", reason="relay:pf_ausente")]
 
-        if abs(relay.pf) < params["pf_min"]:
+        if normalized.pf < params["pf_min"]:
             return [
                 RuleOutcome(
                     status="firing",
                     evidence={
-                        "pf": relay.pf,
+                        "pf": normalized.pf,
                         "pf_min": params["pf_min"],
-                        "kw": relay.kw,
+                        "kw": round(normalized.kw, 2),
+                        "kw_raw": relay.kw,
+                        "normalization": normalized.notes,
                         "measured_at": str(relay.time),
                     },
                 )
