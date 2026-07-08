@@ -23,7 +23,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T07 `plants.sync_catalog`: task Celery de upsert por external_id (primer e2e)
 - [x] T08 Modelos `alarms`: AlarmRule, RuleConfig, Alarm (dedup_key + partial unique constraint), NonComputableInterval, EvaluationRun + migraciones + admin
 - [x] T09 Data migration seed: 20 AlarmRule con params COX (reglas 16 T_mod y 19 THD con enabled=False)
-- [ ] T10 Modelos `notifications`: NotificationChannel (kind, env_key, discord_channel_id, min_severity), NotificationLog (target_channel_id snapshot, unique alarm+channel+event) + admin
+- [x] T10 Modelos `notifications`: NotificationChannel (kind, env_key, discord_channel_id, min_severity), NotificationLog (target_channel_id snapshot, unique alarm+channel+event) + admin
 - [ ] T11 Engine: `rules/base.py` (BaseRule/RuleOutcome/registry), `context.py` (EvaluationContext: cache perezoso de API, sentinel Unavailable, ventanas con lag `[now-persistence-lag, now-lag]`, is_solar_hours, in_maintenance, flag_active), `engine.py` (3 fases, upsert tri-estado, resolución inmediata sin histéresis)
 - [ ] T12 Regla piloto 14 `weather_comm_lost` + ciclo completo upsert/dedup/auto-resolve + tests
 - [ ] T13 Regla piloto 1 `project_no_generation` (ventanas/exclusiones/fases/not_computable) + tests
@@ -44,6 +44,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T10: `channel.webhook_url` lee `os.environ[env_key]` en runtime (django-environ carga el .env a os.environ al importar settings). Unicidad (alarm, channel, event) EXCLUYE `sla_reminder` (puede repetirse). `channel.accepts(severity)` con `Severity.rank`. min_severity default = medium.
 - T09: catálogo en `apps/alarms/catalog.py` (fuente única, importado por la migración 0002). El seed corre en TODOS los tests con DB → tests de modelo NO deben crear reglas con códigos reales (usar `test_rule`). `pr_inputs_missing` quedó en grupo hourly (valida ventanas horarias). Severidades duales del Excel: 13/16/18/19 → medium, 15/20 → high.
 - T08: `nulls_distinct=False` NO funciona en sqlite → NonComputableInterval usa DOS constraints parciales (inverter null / not null). `Severity.rank()` para escalamiento. `Alarm.build_dedup_key(code, ext_id, *suffixes)` ignora sufijos vacíos. Constraint de dedup: `~Q(status="resolved")` — ACTIVE y ACKNOWLEDGED cuentan como abiertas. Admin ya tiene actions ack/resolve manual.
 - T07: smoke e2e real OK: 77 proyectos, 314 inversores, 0 errores. La API devuelve **`installed_capacity="Desconocida"` (string) y campos numéricos vacíos** en algunos proyectos → `schemas.as_float()` los coerce a None; usar as_float para TODO campo numérico que venga de la API. `sync_catalog` NO toca `monitoring_enabled` (override local). ⚠️ Docker sin permisos para el usuario (`permission denied ... docker.sock`) → smokes con sqlite (`DATABASE_URL=sqlite:////...`); pedir al usuario `sudo usermod -aG docker $USER` antes del e2e final con postgres.

@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "django_celery_beat",
     "apps.plants",
     "apps.alarms",
+    "apps.notifications",
 ]
 
 MIDDLEWARE = [
