@@ -21,7 +21,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T05 Cliente SolarView: un método por endpoint + dataclasses en `schemas.py`
 - [x] T06 App `plants`: modelos Project/Inverter/MaintenanceWindow + migraciones + admin
 - [x] T07 `plants.sync_catalog`: task Celery de upsert por external_id (primer e2e)
-- [ ] T08 Modelos `alarms`: AlarmRule, RuleConfig, Alarm (dedup_key + partial unique constraint), NonComputableInterval, EvaluationRun + migraciones + admin
+- [x] T08 Modelos `alarms`: AlarmRule, RuleConfig, Alarm (dedup_key + partial unique constraint), NonComputableInterval, EvaluationRun + migraciones + admin
 - [ ] T09 Data migration seed: 20 AlarmRule con params COX (reglas 16 T_mod y 19 THD con enabled=False)
 - [ ] T10 Modelos `notifications`: NotificationChannel (kind, env_key, discord_channel_id, min_severity), NotificationLog (target_channel_id snapshot, unique alarm+channel+event) + admin
 - [ ] T11 Engine: `rules/base.py` (BaseRule/RuleOutcome/registry), `context.py` (EvaluationContext: cache perezoso de API, sentinel Unavailable, ventanas con lag `[now-persistence-lag, now-lag]`, is_solar_hours, in_maintenance, flag_active), `engine.py` (3 fases, upsert tri-estado, resolución inmediata sin histéresis)
@@ -44,6 +44,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T08: `nulls_distinct=False` NO funciona en sqlite → NonComputableInterval usa DOS constraints parciales (inverter null / not null). `Severity.rank()` para escalamiento. `Alarm.build_dedup_key(code, ext_id, *suffixes)` ignora sufijos vacíos. Constraint de dedup: `~Q(status="resolved")` — ACTIVE y ACKNOWLEDGED cuentan como abiertas. Admin ya tiene actions ack/resolve manual.
 - T07: smoke e2e real OK: 77 proyectos, 314 inversores, 0 errores. La API devuelve **`installed_capacity="Desconocida"` (string) y campos numéricos vacíos** en algunos proyectos → `schemas.as_float()` los coerce a None; usar as_float para TODO campo numérico que venga de la API. `sync_catalog` NO toca `monitoring_enabled` (override local). ⚠️ Docker sin permisos para el usuario (`permission denied ... docker.sock`) → smokes con sqlite (`DATABASE_URL=sqlite:////...`); pedir al usuario `sudo usermod -aG docker $USER` antes del e2e final con postgres.
 - T06: `MaintenanceWindow.objects.active_at(project, at, inverter=None)`: sin inverter devuelve SOLO ventanas de proyecto completo; con inverter devuelve las suyas + las de proyecto. Semántica pensada para `ctx.in_maintenance()`. Migraciones generadas con `DJANGO_SETTINGS_MODULE=config.settings.test` (no requiere postgres corriendo).
 - T05: timestamps se parsean a `datetime` NAIVE hora local (America/Bogota) en `schemas.parse_ts` — formatos `%Y-%m-%d %H:%M:%S`, `%Y-%m-%d %H:%M`, `%Y-%m-%d`. `TimeSeries = dict[datetime, float|None]` (None = inversor sin reporte, común de noche). Métodos tipados: list_projects, project_inverters, project_power, project_weather, relay_now, relay_historical, quoia_history, generation, measurements_dc, project_measurement, availability_detail. Usar `weather.irradiation_poa` para POA.
