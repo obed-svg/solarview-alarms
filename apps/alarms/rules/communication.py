@@ -5,6 +5,7 @@ Corren primero porque sus resultados excluyen a las reglas eléctricas
 """
 
 from apps.alarms.context import Unavailable
+from integrations.solarview.schemas import parse_ts
 
 from .base import BaseRule, RuleOutcome, register
 
@@ -62,3 +63,127 @@ class WeatherCommLost(BaseRule):
                 )
             ]
         return [RuleOutcome(status="ok")]
+
+
+@register
+class InverterCommLost(BaseRule):
+    """Regla 4: inversor sin comunicación.
+
+    Un outcome POR inversor (dedup "inv:{external_id}"). Es problema de
+    comunicación, no falla eléctrica: las reglas eléctricas de fase 3 se
+    excluyen consultando este flag. Inversor sin `time` (nunca reportó) = firing.
+    """
+
+    code = "inverter_comm_lost"
+    phase = 1
+
+    def evaluate(self, ctx) -> list[RuleOutcome]:
+        inverters = ctx.inverters_live()
+        if isinstance(inverters, Unavailable):
+            return [RuleOutcome(status="not_computable", reason=inverters.reason)]
+
+        params = ctx.params(self.code)
+        threshold = params["stale_minutes"] + params.get("data_lag_minutes", 0)
+
+        outcomes = []
+        for inv in inverters:
+            suffix = f"inv:{inv.id}"
+            if ctx.in_maintenance(inverter=ctx.inverter_model(inv.id)):
+                outcomes.append(
+                    RuleOutcome(
+                        status="ok", dedup_suffix=suffix,
+                        inverter_external_id=inv.id, reason="excluded:maintenance",
+                    )
+                )
+                continue
+
+            age_minutes = (
+                None if inv.time is None
+                else (ctx.now - inv.time).total_seconds() / 60
+            )
+            if age_minutes is None or age_minutes > threshold:
+                outcomes.append(
+                    RuleOutcome(
+                        status="firing",
+                        dedup_suffix=suffix,
+                        inverter_external_id=inv.id,
+                        evidence={
+                            "dev_name": inv.dev_name,
+                            "last_data_at": str(inv.time) if inv.time else None,
+                            "age_minutes": None if age_minutes is None else round(age_minutes),
+                            "threshold_minutes": threshold,
+                        },
+                    )
+                )
+            else:
+                outcomes.append(
+                    RuleOutcome(
+                        status="ok", dedup_suffix=suffix, inverter_external_id=inv.id
+                    )
+                )
+        return outcomes
+
+
+@register
+class MeterCommLost(BaseRule):
+    """Regla 8: medidor de frontera (quoia) sin comunicación.
+
+    Solo dispara si los INVERSORES sí reportan (si todo está caído no se puede
+    culpar al medidor → not_computable). Proyecto sin medidor quoia: no aplica.
+    NOTA T03: quoia devuelve 500 en todos los proyectos hoy — mientras siga así
+    esta regla vivirá en not_computable, que es el comportamiento correcto.
+    """
+
+    code = "meter_comm_lost"
+    phase = 1
+
+    def evaluate(self, ctx) -> list[RuleOutcome]:
+        quoia = ctx.quoia()
+        if isinstance(quoia, Unavailable):
+            if quoia.reason == "not_associated":
+                return []
+            return [RuleOutcome(status="not_computable", reason=f"quoia:{quoia.reason}")]
+
+        params = ctx.params(self.code)
+        threshold = params["stale_minutes"]
+
+        timestamps = [ts for ts in (parse_ts(key) for key in quoia) if ts is not None]
+        last_at = max(timestamps, default=None)
+        age_minutes = (
+            None if last_at is None else (ctx.now - last_at).total_seconds() / 60
+        )
+
+        if age_minutes is not None and age_minutes <= threshold:
+            return [RuleOutcome(status="ok")]
+
+        # medidor viejo o sin datos: confirmar que los inversores SÍ reportan
+        inverters = ctx.inverters_live()
+        if isinstance(inverters, Unavailable):
+            return [RuleOutcome(status="not_computable", reason=inverters.reason)]
+        inverter_params = ctx.params("inverter_comm_lost")
+        inv_threshold = (
+            inverter_params["stale_minutes"] + inverter_params.get("data_lag_minutes", 0)
+        )
+        any_inverter_live = any(
+            inv.time and (ctx.now - inv.time).total_seconds() / 60 <= inv_threshold
+            for inv in inverters
+        )
+        if not any_inverter_live:
+            return [
+                RuleOutcome(
+                    status="not_computable",
+                    reason="inversores tampoco reportan: no se puede aislar el medidor",
+                )
+            ]
+
+        return [
+            RuleOutcome(
+                status="firing",
+                evidence={
+                    "last_data_at": str(last_at) if last_at else None,
+                    "age_minutes": None if age_minutes is None else round(age_minutes),
+                    "threshold_minutes": threshold,
+                    "inverters_reporting": True,
+                },
+            )
+        ]

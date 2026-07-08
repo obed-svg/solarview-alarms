@@ -28,7 +28,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T12 Regla piloto 14 `weather_comm_lost` + ciclo completo upsert/dedup/auto-resolve + tests
 - [x] T13 Regla piloto 1 `project_no_generation` (ventanas/exclusiones/fases/not_computable) + tests
 - [x] T14 Canal Discord (embed por severidad, GET webhook→channel_id cacheado) + dispatcher + send_notification con retries + target_channel_id + tests
-- [ ] T15 Reglas comunicación: 4 `inverter_comm_lost`, 8 `meter_comm_lost`
+- [x] T15 Reglas comunicación: 4 `inverter_comm_lost`, 8 `meter_comm_lost`
 - [ ] T16 Reglas calidad datos: 11 `pr_inputs_missing` (sin T_mod), 12 `availability_inputs_missing`, 13 `data_frozen`, 15 `poa_invalid`
 - [ ] T17 Reglas inversor/strings: 2 `inverter_unavailable`, 3 `inverter_derating`, 5 `string_zero_current`, 6 `string_low_current`, 7 `dc_isolation_low`
 - [ ] T18 Reglas medidores: 9 `meter_no_increment`, 10 `meter_inverter_mismatch` (grupo hourly + escalamiento 3%/5%). ⚠️ quoia roto server-side (ver Notas T03): si sigue roto al llegar aquí, mover 8/9/10 a Bloqueadas.
@@ -44,6 +44,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T15: `ctx.inverter_model(external_id)` mapea al modelo plants.Inverter (cache). `meter_comm_lost` exige inversores VIVOS para disparar (si todo caído → not_computable, no se puede aislar el medidor); reusa umbral de `inverter_comm_lost` vía ctx.params. Mientras quoia siga roto (500), la regla 8 vive en not_computable — comportamiento correcto sin Bloqueada.
 - T14: circuito completo engine→Discord listo: `apps/alarms/tasks.py` (dispatch_evaluations fan-out + evaluate_project con lock `cache.add` TTL 270s y notifier=dispatcher.notify). `WebhookNotConfigured` NO reintenta (error de config); `RequestException` sí (backoff, máx 5). GET al webhook de Discord devuelve `channel_id` → cacheado en canal + snapshot por log. Settings: CACHES Redis agregado (locks entre workers; tests usan LocMemCache). FALTA: beat schedule por defecto (crear PeriodicTask al desplegar o en T21) y crear el NotificationChannel inicial (admin o data migration T21).
 - T13: convenciones de exclusión fijadas: mantenimiento → `ok reason="excluded:maintenance"`; meteo inválida (flags fase 1/2) → `not_computable`; recloser abierto → `ok excluded:recloser_open` (regla 17 la cubre); POA < umbral → `ok excluded:low_irradiance`. **relay.active=null o sin relay NO bloquean** (estado a evidence). Tensiones del relay NO se usan (u_a/b/c=0 con planta operando en fixture real — semántica sin validar con backend). `MIN_WINDOW_POINTS=3` para "sostenido". Umbral potencia≈0: capacity×power_zero_ratio, fallback 1 kW sin capacity.
 - T12: patrón de regla validado e2e (engine real + regla real + client mockeado). Convenciones: proyecto SIN el equipo → `return []` (la regla no aplica, cero ruido); API caída → `not_computable`. Nuevos módulos de reglas DEBEN importarse en `apps/alarms/rules/__init__.py` para que @register corra. test_engine.py aísla el registro con fixture autouse `isolated_rules` (las reglas reales no corren ahí con MagicMock) — replicar el patrón si se crean más tests de engine puro.

@@ -144,6 +144,14 @@ class EvaluationContext:
         aware = at.replace(tzinfo=self.tz)
         return times["sunrise"] <= aware <= times["sunset"]
 
+    def inverter_model(self, external_id: int):
+        """Fila plants.Inverter por external_id (None si no está sincronizada)."""
+        if "inverter_models" not in self._cache:
+            self._cache["inverter_models"] = {
+                inv.external_id: inv for inv in self.project.inverters.all()
+            }
+        return self._cache["inverter_models"].get(external_id)
+
     def in_maintenance(self, inverter=None) -> bool:
         aware_now = self.now.replace(tzinfo=self.tz)
         return (
