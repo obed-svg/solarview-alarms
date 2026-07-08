@@ -78,11 +78,16 @@ class InverterCommLost(BaseRule):
     phase = 1
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        params = ctx.params(self.code)
+        # Fuera de horario solar (con margen) los inversores duermen y no
+        # reportar es normal: no evaluar ni tocar alarmas (decisión 2026-07-08,
+        # evita la ola nocturna de ~47 falsas al anochecer)
+        if not ctx.is_solar_hours(margin_minutes=params.get("solar_margin_minutes", 45)):
+            return []
+
         inverters = ctx.inverters_live()
         if isinstance(inverters, Unavailable):
             return [RuleOutcome(status="not_computable", reason=inverters.reason)]
-
-        params = ctx.params(self.code)
         threshold = params["stale_minutes"] + params.get("data_lag_minutes", 0)
 
         outcomes = []

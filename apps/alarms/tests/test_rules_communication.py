@@ -92,6 +92,20 @@ class TestInverterCommLost:
         assert len(outcomes) == 1
         assert outcomes[0].status == "not_computable"
 
+    def test_at_dusk_does_not_evaluate(self, project):
+        # 17:40 con margen 45 min (ocaso fallback 18:00): inversores durmiéndose
+        # no son falla de comunicación — no evalúa ni toca alarmas
+        client_ctx = make_ctx(project, [live(1571, 45)])
+        client_ctx.now = datetime(2026, 7, 8, 17, 40)
+
+        assert InverterCommLost().evaluate(client_ctx) == []
+
+    def test_at_night_does_not_evaluate(self, project):
+        ctx = make_ctx(project, [live(1571, 400)])
+        ctx.now = datetime(2026, 7, 8, 2, 0)
+
+        assert InverterCommLost().evaluate(ctx) == []
+
 
 @pytest.mark.django_db
 class TestMeterCommLost:

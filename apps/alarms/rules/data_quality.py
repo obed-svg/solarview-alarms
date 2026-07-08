@@ -268,6 +268,17 @@ class PrInputsMissing(BaseRule):
         if not ctx.is_solar_hours():
             return [RuleOutcome(status="ok", reason="excluded:night")]
 
+        # la ventana de 60 min debe ser COMPLETAMENTE diurna (con margen):
+        # evita el flap diario cuando el tick hourly cae en el borde del ocaso
+        params = ctx.params(self.code)
+        margin = params.get("solar_margin_minutes", 30)
+        window_start = ctx.now - timedelta(minutes=60)
+        if not (
+            ctx.is_solar_hours(margin_minutes=margin)
+            and ctx.is_solar_hours(at=window_start, margin_minutes=margin)
+        ):
+            return [RuleOutcome(status="ok", reason="excluded:solar_margin")]
+
         quoia = ctx.quoia()
         if isinstance(quoia, Unavailable) and quoia.reason == "not_associated":
             return []
@@ -322,8 +333,13 @@ class AvailabilityInputsMissing(BaseRule):
     phase = 2
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
-        if not ctx.is_solar_hours():
-            return [RuleOutcome(status="ok", reason="excluded:night")]
+        # mismo margen solar que inverter_comm_lost: inversores dormidos al
+        # anochecer no son "datos insuficientes"
+        params_comm = ctx.params("inverter_comm_lost")
+        if not ctx.is_solar_hours(
+            margin_minutes=params_comm.get("solar_margin_minutes", 45)
+        ):
+            return []
 
         inverters = ctx.inverters_live()
         if isinstance(inverters, Unavailable):

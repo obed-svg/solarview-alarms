@@ -130,10 +130,16 @@ class EvaluationContext:
 
     # --- Helpers semánticos ---
 
-    def is_solar_hours(self, at: datetime | None = None) -> bool:
+    def is_solar_hours(self, at: datetime | None = None, margin_minutes: int = 0) -> bool:
+        """¿`at` cae en horario solar? `margin_minutes` recorta ambos extremos:
+        los inversores duermen desde ANTES del ocaso astral (sol bajo = sin
+        producción), así que las reglas sensibles al anochecer usan margen."""
         at = at or self.now
+        margin = timedelta(minutes=margin_minutes)
         if self.project.latitude is None or self.project.longitude is None:
-            return 6 <= at.hour < 18
+            start = at.replace(hour=6, minute=0, second=0, microsecond=0) + margin
+            end = at.replace(hour=18, minute=0, second=0, microsecond=0) - margin
+            return start <= at < end
         from astral import LocationInfo
         from astral.sun import sun
 
@@ -142,7 +148,7 @@ class EvaluationContext:
         )
         times = sun(location.observer, date=at.date(), tzinfo=self.tz)
         aware = at.replace(tzinfo=self.tz)
-        return times["sunrise"] <= aware <= times["sunset"]
+        return times["sunrise"] + margin <= aware <= times["sunset"] - margin
 
     def inverter_model(self, external_id: int):
         """Fila plants.Inverter por external_id (None si no está sincronizada)."""

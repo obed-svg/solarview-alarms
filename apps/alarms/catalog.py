@@ -73,6 +73,7 @@ CATALOG = [
             "stale_minutes": 15,
             "expected_cadence_minutes": 5,
             "data_lag_minutes": 5,
+            "solar_margin_minutes": 45,  # de noche los inversores duermen: no evaluar
         },
     },
     {
@@ -168,7 +169,7 @@ CATALOG = [
         "component_type": "project",
         "default_severity": "critical",
         "rule_group": "hourly",
-        "default_params": {},
+        "default_params": {"solar_margin_minutes": 30},
     },
     {
         "code": "availability_inputs_missing",

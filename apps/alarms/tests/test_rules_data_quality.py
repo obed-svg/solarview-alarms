@@ -186,6 +186,17 @@ class TestPrInputsMissing:
 
         assert PrInputsMissing().evaluate(ctx)[0].status == "ok"
 
+    def test_dusk_edge_excluded_by_solar_margin(self, project):
+        # 17:20: la ventana [16:20, 17:20] toca el margen del ocaso (18:00 - 30min)
+        dusk = datetime(2026, 7, 8, 17, 45)
+        ctx = make_ctx(project, now=dusk, weather=SolarViewNotAssociated("no estación"),
+                       power=power_of({}), quoia={}, dc={})
+
+        outcomes = PrInputsMissing().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
+        assert outcomes[0].reason == "excluded:solar_margin"
+
     def test_interval_idempotent_same_hour(self, project):
         ctx_kwargs = dict(
             weather=SolarViewNotAssociated("no estación"),
@@ -242,8 +253,15 @@ class TestAvailabilityInputsMissing:
         assert outcomes[0].status == "firing"
         assert "poa" in outcomes[0].evidence["missing_inputs"]
 
-    def test_night_is_ok(self, project):
+    def test_night_does_not_evaluate(self, project):
         ctx = make_ctx(project, now=NIGHT, inverters=self.inverters(),
                        weather=weather_of({}))
 
-        assert all(o.status == "ok" for o in AvailabilityInputsMissing().evaluate(ctx))
+        assert AvailabilityInputsMissing().evaluate(ctx) == []
+
+    def test_dusk_margin_does_not_evaluate(self, project):
+        dusk = datetime(2026, 7, 8, 17, 30)  # margen 45 sobre ocaso fallback 18:00
+        ctx = make_ctx(project, now=dusk, inverters=self.inverters(time_ok=False),
+                       weather=weather_of({}))
+
+        assert AvailabilityInputsMissing().evaluate(ctx) == []

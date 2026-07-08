@@ -45,6 +45,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 ## Post-COMPLETADO
 
+- [x] T23 (2026-07-08): auditoría al anochecer detectó ola nocturna (~47 inverter_comm_lost + cascada a las 17:54 por inversores durmiéndose, y 73 pr_inputs_missing con flap en el borde del ocaso + quoia devolviendo 200-vacío en muchos proyectos). Fix: `ctx.is_solar_hours(margin_minutes=N)`; reglas 4 y 12 devuelven [] fuera de [amanecer+45, ocaso-45]; regla 11 exige ventana horaria completamente diurna (margen 30). Params en migración 0005. Las 193 alarmas de la ola se resolvieron en lote (sin notificación: update masivo no pasa por dispatcher).
 - [x] T22 (2026-07-08): T_mod definido por el usuario = `temperature_POA` (temperatura del panel). Regla 16 `tmod_invalid` implementada (missing/frozen/out_of_range/incoherent_vs_ambient, solo horario solar, sin estación no aplica) + habilitada por migración 0004; regla 11 ahora exige T_mod cuando el proyecto tiene estación. 19/20 reglas activas (solo THD disabled).
 
 ## Notas entre iteraciones
