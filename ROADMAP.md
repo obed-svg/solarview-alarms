@@ -24,7 +24,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T08 Modelos `alarms`: AlarmRule, RuleConfig, Alarm (dedup_key + partial unique constraint), NonComputableInterval, EvaluationRun + migraciones + admin
 - [x] T09 Data migration seed: 20 AlarmRule con params COX (reglas 16 T_mod y 19 THD con enabled=False)
 - [x] T10 Modelos `notifications`: NotificationChannel (kind, env_key, discord_channel_id, min_severity), NotificationLog (target_channel_id snapshot, unique alarm+channel+event) + admin
-- [ ] T11 Engine: `rules/base.py` (BaseRule/RuleOutcome/registry), `context.py` (EvaluationContext: cache perezoso de API, sentinel Unavailable, ventanas con lag `[now-persistence-lag, now-lag]`, is_solar_hours, in_maintenance, flag_active), `engine.py` (3 fases, upsert tri-estado, resolución inmediata sin histéresis)
+- [x] T11 Engine: `rules/base.py` (BaseRule/RuleOutcome/registry), `context.py` (EvaluationContext: cache perezoso de API, sentinel Unavailable, ventanas con lag `[now-persistence-lag, now-lag]`, is_solar_hours, in_maintenance, flag_active), `engine.py` (3 fases, upsert tri-estado, resolución inmediata sin histéresis)
 - [ ] T12 Regla piloto 14 `weather_comm_lost` + ciclo completo upsert/dedup/auto-resolve + tests
 - [ ] T13 Regla piloto 1 `project_no_generation` (ventanas/exclusiones/fases/not_computable) + tests
 - [ ] T14 Canal Discord (embed por severidad, GET webhook→channel_id cacheado) + dispatcher + send_notification con retries + target_channel_id + tests
@@ -44,6 +44,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T11: convención de tiempo: `ctx.now` es NAIVE hora local del proyecto (la API entrega naive local) — comparar series directo; para DB (aware) el engine usa `django.utils.timezone.now()`. `RuleOutcome.inverter_external_id` permite al engine resolver el FK. Severidad solo ESCALA, nunca baja. `evaluate_project(notifier=...)` — el dispatcher se conecta en T14. `validate_registry()` lista códigos sin clase (`alarm_sla_breach` excluido: corre en check_sla). Reglas de test: registrar con @register y `RULES.pop` en teardown. `ctx.poa_series()` prefiere weather.irradiation_poa, fallback power.irradiance.
 - T10: `channel.webhook_url` lee `os.environ[env_key]` en runtime (django-environ carga el .env a os.environ al importar settings). Unicidad (alarm, channel, event) EXCLUYE `sla_reminder` (puede repetirse). `channel.accepts(severity)` con `Severity.rank`. min_severity default = medium.
 - T09: catálogo en `apps/alarms/catalog.py` (fuente única, importado por la migración 0002). El seed corre en TODOS los tests con DB → tests de modelo NO deben crear reglas con códigos reales (usar `test_rule`). `pr_inputs_missing` quedó en grupo hourly (valida ventanas horarias). Severidades duales del Excel: 13/16/18/19 → medium, 15/20 → high.
 - T08: `nulls_distinct=False` NO funciona en sqlite → NonComputableInterval usa DOS constraints parciales (inverter null / not null). `Severity.rank()` para escalamiento. `Alarm.build_dedup_key(code, ext_id, *suffixes)` ignora sufijos vacíos. Constraint de dedup: `~Q(status="resolved")` — ACTIVE y ACKNOWLEDGED cuentan como abiertas. Admin ya tiene actions ack/resolve manual.
