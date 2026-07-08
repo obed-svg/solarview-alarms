@@ -12,6 +12,17 @@ from apps.plants.models import Project
 NOW = datetime(2026, 7, 8, 12, 0)
 
 
+@pytest.fixture(autouse=True)
+def isolated_rules():
+    """Estos tests prueban el ENGINE con reglas sintéticas: se vacía el registro
+    de reglas reales para que no corran con clients MagicMock."""
+    saved = dict(RULES)
+    RULES.clear()
+    yield
+    RULES.clear()
+    RULES.update(saved)
+
+
 @pytest.fixture
 def project(db):
     return Project.objects.create(external_id=146, name="El Son", synced_at=timezone.now())
