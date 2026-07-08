@@ -161,8 +161,8 @@ CATALOG = [
         "code": "pr_inputs_missing",
         "name": "Datos insuficientes para PR",
         "description": (
-            "Falta energía AC, POA o P_DC. Marca el intervalo como no calculable. "
-            "(T_mod excluido por ahora: dato incierto.)"
+            "Falta energía AC, POA, P_DC o T_mod (esta última solo si el proyecto "
+            "tiene estación). Marca el intervalo como no calculable."
         ),
         "category": "data",
         "component_type": "project",
@@ -226,13 +226,21 @@ CATALOG = [
     {
         "code": "tmod_invalid",
         "name": "Temperatura de módulo inválida",
-        "description": "DESHABILITADA: T_mod aún es incierto (no se sabe qué sensor es).",
+        "description": (
+            "T_mod (temperature_POA, sensor del panel) nula, congelada, fuera de "
+            "rango físico o incoherente con el ambiente bajo POA alta."
+        ),
         "category": "weather",
         "component_type": "weather_station",
         "default_severity": "medium",
         "rule_group": "fast",
-        "default_params": {},
-        "enabled": False,
+        "default_params": {
+            "frozen_intervals": 3,
+            "tmod_min_c": -10,
+            "tmod_max_c": 90,
+            "coherence_margin_c": 5,
+            "poa_for_coherence_wm2": 300,
+        },
     },
     {
         "code": "recloser_open",

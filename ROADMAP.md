@@ -43,6 +43,10 @@ Reglas de ejecución (para cada iteración del loop):
 - **Validar reglas 8/9/10 contra quoia real**: `/quoia_measurements_history/` devuelve 500 en TODOS los proyectos (bugs backend: `ProjectInfo matching query does not exist` y `cannot access local variable 'updated_node'`). Las 3 reglas están implementadas contra la doc y viven en not_computable (sin ruido) mientras tanto. Acción humana: reportar al equipo del backend; al arreglarse, sondear payload real y ajustar `_frontier_delta_kwh` si la forma difiere.
 - **Códigos de `state` del inversor para reglas 3 y 7**: solo se ha observado "Grid-connected". DERATING_KEYWORDS/ISOLATION_KEYWORDS son tentativos. Acción humana: pedir al backend el vocabulario completo de estados (¿expone derating/aislamiento?) o capturar states durante una falla real.
 
+## Post-COMPLETADO
+
+- [x] T22 (2026-07-08): T_mod definido por el usuario = `temperature_POA` (temperatura del panel). Regla 16 `tmod_invalid` implementada (missing/frozen/out_of_range/incoherent_vs_ambient, solo horario solar, sin estación no aplica) + habilitada por migración 0004; regla 11 ahora exige T_mod cuando el proyecto tiene estación. 19/20 reglas activas (solo THD disabled).
+
 ## Notas entre iteraciones
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)

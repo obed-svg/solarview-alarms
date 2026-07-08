@@ -169,6 +169,92 @@ class DataFrozen(BaseRule):
 
 
 @register
+class TmodInvalid(BaseRule):
+    """Regla 16: temperatura de módulo inválida. T_mod = `temperature_POA` del
+    endpoint weather (confirmado por el usuario 2026-07-08: temperatura del panel).
+
+    Dispara si, en horario solar y con estación presente: la serie viene vacía,
+    está congelada, sale del rango físico, o es incoherente con el ambiente
+    (panel mucho más frío que el aire con POA alta = sensor malo).
+    """
+
+    code = "tmod_invalid"
+    phase = 2
+
+    def evaluate(self, ctx) -> list[RuleOutcome]:
+        weather = ctx.weather()
+        if isinstance(weather, Unavailable):
+            if weather.reason == "not_associated":
+                return []  # sin estación no hay sensor de panel: la regla no aplica
+            return [RuleOutcome(status="not_computable", reason=weather.reason)]
+
+        if not ctx.is_solar_hours():
+            return [RuleOutcome(status="ok", reason="excluded:night")]
+
+        params = ctx.params(self.code)
+        window_minutes = params["frozen_intervals"] * INTERVAL_MINUTES
+
+        tmod = [
+            v for v in ctx.series_window(weather.temperature_poa, window_minutes).values()
+            if v is not None
+        ]
+        if len(tmod) < MIN_POINTS:
+            return [
+                RuleOutcome(
+                    status="firing",
+                    evidence={"issue": "missing", "points_in_window": len(tmod)},
+                )
+            ]
+
+        if min(tmod) < params["tmod_min_c"] or max(tmod) > params["tmod_max_c"]:
+            return [
+                RuleOutcome(
+                    status="firing",
+                    evidence={
+                        "issue": "out_of_range",
+                        "min_c": min(tmod), "max_c": max(tmod),
+                        "valid_range_c": [params["tmod_min_c"], params["tmod_max_c"]],
+                    },
+                )
+            ]
+
+        if _is_frozen(tmod):
+            return [
+                RuleOutcome(
+                    status="firing",
+                    evidence={"issue": "frozen", "value_c": tmod[0],
+                              "window_minutes": window_minutes},
+                )
+            ]
+
+        poa = [
+            v for v in ctx.series_window(weather.irradiation_poa, window_minutes).values()
+            if v is not None
+        ]
+        tamb = [
+            v for v in ctx.series_window(weather.temperature, window_minutes).values()
+            if v is not None
+        ]
+        if poa and tamb and min(poa) > params["poa_for_coherence_wm2"]:
+            avg_tmod = sum(tmod) / len(tmod)
+            avg_tamb = sum(tamb) / len(tamb)
+            if avg_tmod < avg_tamb - params["coherence_margin_c"]:
+                return [
+                    RuleOutcome(
+                        status="firing",
+                        evidence={
+                            "issue": "incoherent_vs_ambient",
+                            "avg_tmod_c": round(avg_tmod, 1),
+                            "avg_ambient_c": round(avg_tamb, 1),
+                            "poa_min_wm2": round(min(poa)),
+                        },
+                    )
+                ]
+
+        return [RuleOutcome(status="ok")]
+
+
+@register
 class PrInputsMissing(BaseRule):
     """Regla 11: insumos de PR incompletos en la última hora (energía AC de
     frontera, POA, P_DC). T_mod excluido (dato incierto). Marca
@@ -211,6 +297,12 @@ class PrInputsMissing(BaseRule):
             )
             if not has_fresh_dc:
                 missing.append("p_dc")
+
+        # T_mod (temperature_POA) solo exigible si el proyecto tiene estación
+        weather = ctx.weather()
+        if not isinstance(weather, Unavailable):
+            if not ctx.series_window(weather.temperature_poa, 60):
+                missing.append("t_mod")
 
         if missing:
             _mark_non_computable(ctx, "pr", missing, floor_minutes=60)

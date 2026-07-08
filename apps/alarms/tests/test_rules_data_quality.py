@@ -57,10 +57,13 @@ def make_ctx(project, now=NOW, weather=None, power=None, inverters=None, quoia=N
     return EvaluationContext(project=project, client=client, now=now)
 
 
-def weather_of(poa_series, temp_series=None):
+def weather_of(poa_series, temp_series=None, tmod_series=None):
+    # tmod por defecto sano: la regla 11 ahora exige T_mod cuando hay estación
+    if tmod_series is None:
+        tmod_series = {ts: 45.0 + i * 0.1 for i, ts in enumerate(poa_series)}
     return WeatherSeries(
         irradiation={}, irradiation_poa=poa_series,
-        temperature=temp_series or {}, temperature_poa={}, wind_speed={},
+        temperature=temp_series or {}, temperature_poa=tmod_series, wind_speed={},
     )
 
 

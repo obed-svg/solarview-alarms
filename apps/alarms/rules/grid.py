@@ -87,18 +87,6 @@ class PowerFactorLow(BaseRule):
 
 
 @register
-class TmodInvalid(BaseRule):
-    """Regla 16 — STUB deshabilitado en el seed: T_mod es incierto (no se sabe
-    qué sensor es). Implementar cuando el equipo lo defina."""
-
-    code = "tmod_invalid"
-    phase = 2
-
-    def evaluate(self, ctx) -> list[RuleOutcome]:
-        return []
-
-
-@register
 class ThdAbnormal(BaseRule):
     """Regla 19 — STUB deshabilitado en el seed: la API no expone THD ni
     variables de calidad de energía."""

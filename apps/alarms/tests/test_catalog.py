@@ -10,10 +10,11 @@ class TestSeededCatalog:
         assert AlarmRule.objects.count() == 20
         assert {r.code for r in AlarmRule.objects.all()} == {e["code"] for e in CATALOG}
 
-    def test_tmod_and_thd_seeded_disabled(self):
-        assert AlarmRule.objects.get(code="tmod_invalid").enabled is False
+    def test_only_thd_disabled(self):
+        # tmod_invalid se habilitó al definirse T_mod = temperature_POA (mig. 0004)
+        assert AlarmRule.objects.get(code="tmod_invalid").enabled is True
         assert AlarmRule.objects.get(code="thd_abnormal").enabled is False
-        assert AlarmRule.objects.filter(enabled=True).count() == 18
+        assert AlarmRule.objects.filter(enabled=True).count() == 19
 
     def test_cox_params_present(self):
         weather = AlarmRule.objects.get(code="weather_comm_lost")

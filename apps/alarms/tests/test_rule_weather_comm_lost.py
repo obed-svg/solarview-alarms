@@ -99,7 +99,7 @@ class TestFullCycleThroughEngine:
         self._run(project, weather_with_last_point(50))
         alarm.refresh_from_db()
         assert alarm.occurrence_count == 2
-        assert Alarm.objects.count() == 1
+        assert Alarm.objects.filter(rule__code="weather_comm_lost").count() == 1
 
         # tick 3: vuelve el dato → resuelta de inmediato
         self._run(project, weather_with_last_point(2))
