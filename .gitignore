@@ -1,0 +1,23 @@
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Django
+db.sqlite3
+staticfiles/
+
+# Env / secrets
+.env
+.env.*
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Office lock files
+.~lock.*#
