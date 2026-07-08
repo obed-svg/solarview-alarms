@@ -8,7 +8,8 @@ from apps.plants.models import Project
 
 
 def make_channel(**kwargs) -> NotificationChannel:
-    defaults = {"name": "ops-discord", "kind": NotificationChannel.Kind.DISCORD}
+    # nombre propio de tests: la migración 0002 ya seedea "ops-discord"
+    defaults = {"name": "test-channel", "kind": NotificationChannel.Kind.DISCORD}
     defaults.update(kwargs)
     return NotificationChannel.objects.create(**defaults)
 

@@ -12,7 +12,7 @@ Reglas de ejecución (para cada iteración del loop):
   solo en runtime, NUNCA leer/imprimir el `.env` ni sus valores.
 - API externa SIEMPRE vía alias `/monitoring/` (no `/api/`).
 
-## Estado: EN PROGRESO
+## Estado: COMPLETADO (2026-07-08) — quedan 2 items en Bloqueadas que requieren acción del backend
 
 - [x] T01 Scaffolding: proyecto Django `config/` + settings (base/dev/prod con django-environ) + docker-compose (postgres:16, redis:7) + pyproject + pytest-django/ruff + healthcheck
 - [x] T02 `config/celery.py`: app Celery, colas (evaluation, notifications, sync), django-celery-beat
@@ -34,7 +34,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T18 Reglas medidores: 9 `meter_no_increment`, 10 `meter_inverter_mismatch` (grupo hourly + escalamiento 3%/5%). Implementadas contra la forma documentada del payload; quoia sigue 500 (re-verificado en 3 proyectos) → validación real pendiente en Bloqueadas.
 - [x] T19 Reglas red/calidad: 17 `recloser_open`, 18 `power_factor_low` (+ stubs 16, 19 disabled)
 - [x] T20 `check_sla` (regla 20 `alarm_sla_breach`) + escalamiento
-- [ ] T21 Hardening: locks Redis anti-solape, EvaluationRun como dashboard en admin, tuning colas
+- [x] T21 Hardening: schedules beat por defecto (migración), canal ops-discord seed (disabled), dashboard EvaluationRun en admin, README de operación, smoke e2e del engine completo contra API real
 
 ## Bloqueadas
 
@@ -47,6 +47,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T21: smoke e2e real: proyecto 146 SUCCESS 25s (muchas requests; aceptable con fan-out paralelo, vigilar con 77 proyectos), 121 SUCCESS 4.5s y abrió alarma real `poa_invalid` con cascada de exclusiones correcta (reglas dependientes de POA → not_computable). Canal ops-discord seed DISABLED — encenderlo en admin al salir a producción. Schedules beat por migración (editables en admin).
 - T20: `check_sla` reusa `_process_outcome` del engine (upsert/dedup/notify idénticos). Dedup del breach: `alarm_sla_breach:{ext_id}:alarm:{source_id}` — el source_id se recupera del dedup_key al resolver. SLA solo sobre ACTIVE (ack detiene el reloj). Breaches excluidos del scan (sin recursión). Escala a critical al superar sla × escalate_after_multiplier.
 - T19: `validate_registry()` ahora vacío (test lo garantiza): las 19 reglas de engine tienen clase; stubs 16/19 devuelven [] y siguen disabled en seed. `recloser_open`: apertura en ventana de mantenimiento = programada (ok); active=null → not_computable. `power_factor_low`: usa abs(pf) (pf puede venir con signo según dirección del flujo).
 - T17: persistencia de `inverter_unavailable` verificada con corrientes DC (cadencia 5 min), no con power live instantáneo. "Todos caídos" → ok excluded (lo cubre project_no_generation); "todas las strings en 0" → ok (nivel inversor, no string). Reglas 3 y 7 dependen de KEYWORDS sobre `state` (DERATING_KEYWORDS/ISOLATION_KEYWORDS en inverter.py/strings.py) — solo se ha visto "Grid-connected"; ampliar keywords cuando aparezcan estados de falla reales o el backend confirme el vocabulario. `rules/helpers.py`: poa_sustained_above (tri-valor True/False/None), window_average, dev_name→external_id.

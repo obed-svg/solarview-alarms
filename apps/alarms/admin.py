@@ -55,6 +55,30 @@ class NonComputableIntervalAdmin(admin.ModelAdmin):
 
 @admin.register(EvaluationRun)
 class EvaluationRunAdmin(admin.ModelAdmin):
-    list_display = ("project", "rule_group", "started_at", "finished_at", "status")
+    """Dashboard operativo: ¿está corriendo bien la evaluación por proyecto?"""
+
+    list_display = (
+        "project", "rule_group", "started_at", "duration", "status",
+        "opened", "resolved", "errors",
+    )
     list_filter = ("status", "rule_group", "project")
     date_hierarchy = "started_at"
+    readonly_fields = ("stats",)
+
+    @admin.display(description="Duración")
+    def duration(self, run):
+        if not run.finished_at:
+            return "—"
+        return f"{(run.finished_at - run.started_at).total_seconds():.1f}s"
+
+    @admin.display(description="Abiertas")
+    def opened(self, run):
+        return run.stats.get("opened", 0)
+
+    @admin.display(description="Resueltas")
+    def resolved(self, run):
+        return run.stats.get("resolved", 0)
+
+    @admin.display(description="Errores")
+    def errors(self, run):
+        return ", ".join(run.stats.get("errors", {})) or "—"
