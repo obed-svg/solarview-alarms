@@ -64,6 +64,12 @@ class PowerFactorLow(BaseRule):
                 return []
             return [RuleOutcome(status="not_computable", reason=f"relay:{relay.reason}")]
 
+        # FP solo es representativo cuando la planta genera: de noche solo hay
+        # consumo auxiliar con FP naturalmente malo. Doble protección junto con
+        # min_load_kw (que además depende de la unidad real del relay, ver T25).
+        if not ctx.is_solar_hours():
+            return [RuleOutcome(status="ok", reason="excluded:night")]
+
         params = ctx.params(self.code)
 
         if relay.kw is None or relay.kw < params["min_load_kw"]:

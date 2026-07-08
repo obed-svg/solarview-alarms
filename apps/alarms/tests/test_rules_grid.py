@@ -113,6 +113,15 @@ class TestPowerFactorLow:
             make_ctx(project, SolarViewNotAssociated("Relay not found"))
         ) == []
 
+    def test_night_is_excluded(self, project):
+        # visto en producción: FP 0.318 a las 18:40 = consumo auxiliar nocturno
+        outcomes = PowerFactorLow().evaluate(
+            make_ctx(project, relay(pf=0.318, kw=5832.96), now=NIGHT)
+        )
+
+        assert outcomes[0].status == "ok"
+        assert outcomes[0].reason == "excluded:night"
+
 
 @pytest.mark.django_db
 class TestRegistryComplete:
