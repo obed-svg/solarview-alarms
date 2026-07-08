@@ -32,7 +32,7 @@ Reglas de ejecución (para cada iteración del loop):
 - [x] T16 Reglas calidad datos: 11 `pr_inputs_missing` (sin T_mod), 12 `availability_inputs_missing`, 13 `data_frozen`, 15 `poa_invalid`
 - [x] T17 Reglas inversor/strings: 2 `inverter_unavailable`, 3 `inverter_derating`, 5 `string_zero_current`, 6 `string_low_current`, 7 `dc_isolation_low`
 - [x] T18 Reglas medidores: 9 `meter_no_increment`, 10 `meter_inverter_mismatch` (grupo hourly + escalamiento 3%/5%). Implementadas contra la forma documentada del payload; quoia sigue 500 (re-verificado en 3 proyectos) → validación real pendiente en Bloqueadas.
-- [ ] T19 Reglas red/calidad: 17 `recloser_open`, 18 `power_factor_low` (+ stubs 16, 19 disabled)
+- [x] T19 Reglas red/calidad: 17 `recloser_open`, 18 `power_factor_low` (+ stubs 16, 19 disabled)
 - [ ] T20 `check_sla` (regla 20 `alarm_sla_breach`) + escalamiento
 - [ ] T21 Hardening: locks Redis anti-solape, EvaluationRun como dashboard en admin, tuning colas
 
@@ -47,6 +47,7 @@ Reglas de ejecución (para cada iteración del loop):
 
 (gotchas que la siguiente iteración debe conocer: cadencias reales, formatos de timestamp, códigos de state, etc.)
 
+- T19: `validate_registry()` ahora vacío (test lo garantiza): las 19 reglas de engine tienen clase; stubs 16/19 devuelven [] y siguen disabled en seed. `recloser_open`: apertura en ventana de mantenimiento = programada (ok); active=null → not_computable. `power_factor_low`: usa abs(pf) (pf puede venir con signo según dirección del flujo).
 - T17: persistencia de `inverter_unavailable` verificada con corrientes DC (cadencia 5 min), no con power live instantáneo. "Todos caídos" → ok excluded (lo cubre project_no_generation); "todas las strings en 0" → ok (nivel inversor, no string). Reglas 3 y 7 dependen de KEYWORDS sobre `state` (DERATING_KEYWORDS/ISOLATION_KEYWORDS en inverter.py/strings.py) — solo se ha visto "Grid-connected"; ampliar keywords cuando aparezcan estados de falla reales o el backend confirme el vocabulario. `rules/helpers.py`: poa_sustained_above (tri-valor True/False/None), window_average, dev_name→external_id.
 - T16: "3 intervalos consecutivos" interpretado como frozen_intervals × 15 min (intervalo IEC), NO 3 puntos de cadencia cruda. Congelado = max-min < 1e-6 con ≥3 puntos. data_frozen NO evalúa POA (evita duplicar poa_invalid); potencia 0 constante tampoco cuenta (la cubre project_no_generation). Reglas 11/12 ESCRIBEN NonComputableInterval con get_or_create + floor (60min pr, 15min availability) — idempotente entre ticks. Regla 11 no aplica sin medidor quoia (sin frontera no hay PR contractual). PoaInvalid con POA=0 + generación usa umbral fijo 5 kW.
 - T15: `ctx.inverter_model(external_id)` mapea al modelo plants.Inverter (cache). `meter_comm_lost` exige inversores VIVOS para disparar (si todo caído → not_computable, no se puede aislar el medidor); reusa umbral de `inverter_comm_lost` vía ctx.params. Mientras quoia siga roto (500), la regla 8 vive en not_computable — comportamiento correcto sin Bloqueada.
