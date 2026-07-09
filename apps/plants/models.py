@@ -83,3 +83,35 @@ class MaintenanceWindow(models.Model):
     def __str__(self):
         scope = self.inverter or "proyecto"
         return f"Mantenimiento {self.project_id}/{scope}: {self.starts_at} - {self.ends_at}"
+
+
+class InverterStateObservation(models.Model):
+    """Censo pasivo del vocabulario de `state` de los inversores (T30).
+
+    El backend consulta inversores Huawei SUN2000: `state` debería ser el enum
+    "Device status" (registro Modbus 32089) en texto, pero la redacción exacta
+    que entrega SolarView está POR CONFIRMAR (T31) — solo se han observado
+    "Grid-connected" y "Standby: insulation resistance detecting". Cada tick
+    del engine anota aquí los estados vistos (reusa los inversores que las
+    reglas ya consultaron: cero requests extra). Cuando aparezca un estado
+    nuevo (derating, falla), queda registrado con fecha, proyecto e inversor
+    para ajustar los keywords de las reglas 3/7 con evidencia.
+    """
+
+    state = models.CharField(max_length=255, unique=True)
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField()
+    times_seen = models.PositiveIntegerField(
+        default=1, help_text="Avistamientos acumulados (inversor × tick)"
+    )
+    first_project = models.ForeignKey(
+        Project, null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        help_text="Proyecto donde se observó por primera vez",
+    )
+    first_dev_name = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        ordering = ["-last_seen_at"]
+
+    def __str__(self):
+        return self.state

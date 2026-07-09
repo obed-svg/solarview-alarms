@@ -11,14 +11,16 @@ que las exclusiones consulten ctx.flag_active().
 """
 
 import logging
+from collections import Counter
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.utils import timezone as dj_timezone
 
-from apps.plants.models import Inverter
+from apps.plants.models import Inverter, InverterStateObservation
 from integrations.solarview.client import SolarViewClient
 
-from .context import EvaluationContext
+from .context import EvaluationContext, Unavailable
 from .models import Alarm, AlarmRule, EvaluationRun, Severity
 from .rules import base as rules_base
 from .rules.base import RULES, RuleOutcome
@@ -81,10 +83,54 @@ def evaluate_project(
                 stats["errors"][rule.code] = "outcome_processing"
                 run.status = EvaluationRun.Status.PARTIAL
 
+    try:
+        _record_state_observations(ctx)
+    except Exception:
+        # el censo es observabilidad, nunca degrada el run
+        logger.exception("Censo de estados falló en proyecto %s", project.external_id)
+
     run.finished_at = dj_timezone.now()
     run.stats = stats
     run.save(update_fields=["finished_at", "stats", "status"])
     return run
+
+
+def _record_state_observations(ctx: EvaluationContext) -> None:
+    """T30: censo pasivo del vocabulario de `state` (Huawei SUN2000, ver
+    InverterStateObservation). Reusa los inversores que las reglas ya
+    consultaron en este tick — si ninguna regla los pidió o la API falló,
+    no hace nada. Cero requests extra."""
+    inverters = ctx._cache.get("inverters")
+    if not inverters or isinstance(inverters, Unavailable):
+        return
+
+    counts = Counter(inv.state for inv in inverters if inv.state)
+    now = dj_timezone.now()
+    for state, n in counts.items():
+        updated = InverterStateObservation.objects.filter(state=state).update(
+            times_seen=F("times_seen") + n, last_seen_at=now
+        )
+        if updated:
+            continue
+        first = next(inv for inv in inverters if inv.state == state)
+        try:
+            with transaction.atomic():  # savepoint: la carrera no rompe el tick
+                InverterStateObservation.objects.create(
+                    state=state,
+                    last_seen_at=now,
+                    times_seen=n,
+                    first_project=ctx.project,
+                    first_dev_name=first.dev_name or "",
+                )
+            logger.info(
+                "Estado de inversor NUEVO observado: %r (proyecto %s, %s)",
+                state, ctx.project.external_id, first.dev_name,
+            )
+        except IntegrityError:
+            # otro worker lo creó en paralelo: contar este avistamiento igual
+            InverterStateObservation.objects.filter(state=state).update(
+                times_seen=F("times_seen") + n, last_seen_at=now
+            )
 
 
 def _notify(notifier, alarm: Alarm, event: str) -> None:

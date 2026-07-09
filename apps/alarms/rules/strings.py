@@ -5,9 +5,13 @@ from apps.alarms.context import Unavailable
 from .base import BaseRule, RuleOutcome, register
 from .helpers import dev_name_to_external_id, poa_sustained_above, window_average
 
-# El state real es "Modo: detalle" (visto: "Standby: insulation resistance
-# detecting" = AUTO-TEST rutinario, no falla). Solo es falla si el texto de
-# aislamiento viene acompañado de un calificador de problema.
+# El state real es "Modo: detalle" (enum Huawei SUN2000, ver inverter.py; visto:
+# "Standby: insulation resistance detecting" = AUTO-TEST rutinario, no falla).
+# Solo es falla si el texto de aislamiento viene acompañado de un calificador de
+# problema. NOTA Huawei: la falla real de aislamiento llega como ALARMA separada
+# ("Low insulation resistance", ID 2062) con state genérico "Shutdown: fault";
+# el Modbus expone la resistencia en MΩ (registro 32088) — pedir al backend
+# exponerla para pasar de keywords a umbral físico (T31).
 ISOLATION_KEYWORDS = ("isolat", "insulat", "aislam")
 FAULT_QUALIFIERS = ("low", "fault", "abnormal", "fail", "baja", "falla")
 

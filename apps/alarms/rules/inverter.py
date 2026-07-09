@@ -5,8 +5,26 @@ from apps.alarms.context import Unavailable
 from .base import BaseRule, RuleOutcome, register
 from .helpers import poa_sustained_above, window_average
 
-# Keywords sobre `state` (string legible en la API real; solo se ha observado
-# "Grid-connected" — ampliar cuando aparezcan estados de falla reales, ver T03)
+# Keywords sobre `state`. El backend consulta inversores Huawei SUN2000: `state`
+# es el enum "Device status" (registro Modbus 32089) en texto. Redacción exacta
+# de SolarView POR CONFIRMAR con el censo InverterStateObservation (T31);
+# observados reales: "Grid-connected", "Standby: insulation resistance detecting".
+#
+# Vocabulario Huawei esperado (por familia):
+#   Standby: initializing | insulation resistance detecting | irradiation
+#     detecting | grid detecting          → auto-tests, NO falla
+#   Starting                              → transitorio del amanecer
+#   Grid-connected (On-grid)              → normal
+#   Grid connection: power limited        → DERATING ("limit" lo atrapa)
+#   Grid connection: self-derating        → DERATING ("derat" lo atrapa)
+#   Shutdown: fault | command | OVGR | communication disconnected |
+#     power limited | manual startup required | DC switches disconnected |
+#     rapid cutoff | input underpower     → apagados (la regla 2 los cubre)
+#   Grid scheduling: cosφ-P | Q-U | PF-U | dry contact | Q-P curve
+#                                         → gestión del operador de red, NO falla
+#   Spot-check | Inspecting | AFCI self check | I-V scanning |
+#     DC input detection                  → diagnósticos rutinarios
+#   (de noche SolarView entrega state=None, censo 2026-07-08: 314/314)
 DERATING_KEYWORDS = ("derat", "limit", "fan", "over-temp", "overtemp")
 
 
