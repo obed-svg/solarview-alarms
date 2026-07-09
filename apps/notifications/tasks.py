@@ -5,7 +5,7 @@ from celery import shared_task
 from django.utils import timezone
 
 from .channels.base import CHANNEL_REGISTRY
-from .channels.discord import WebhookNotConfigured
+from .channels.discord import DiscordRateLimited, WebhookNotConfigured
 from .models import NotificationLog
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
     autoretry_for=(requests.RequestException,),
     retry_backoff=True,
     retry_backoff_max=600,
-    max_retries=5,
+    max_retries=8,
+    rate_limit="25/m",  # T43: el webhook de Discord tolera ~30/min
 )
 def send_notification(log_id: int) -> None:
     log = (
@@ -40,6 +41,15 @@ def send_notification(log_id: int) -> None:
         log.save(update_fields=["status", "last_error", "attempts"])
         logger.error("Notificación %s sin webhook: %s", log_id, exc)
         return
+    except DiscordRateLimited as exc:
+        # T43: reintentar exactamente cuando Discord lo indica (no backoff
+        # ciego — la ola del arranque agotaba los 5 reintentos y perdía 274
+        # notificaciones). El rate_limit de 25/min evita volver a chocar.
+        log.last_error = str(exc)
+        log.save(update_fields=["last_error", "attempts"])
+        raise send_notification.retry(
+            exc=exc, countdown=exc.retry_after + 1, max_retries=10
+        ) from exc
     except requests.RequestException as exc:
         log.status = NotificationLog.Status.FAILED
         log.last_error = str(exc)

@@ -6,7 +6,11 @@ import responses
 from django.utils import timezone
 
 from apps.alarms.models import Alarm, AlarmRule, Severity
-from apps.notifications.channels.discord import SEVERITY_COLORS, DiscordChannel
+from apps.notifications.channels.discord import (
+    SEVERITY_COLORS,
+    DiscordChannel,
+    DiscordRateLimited,
+)
 from apps.notifications.dispatcher import notify
 from apps.notifications.models import NotificationChannel, NotificationLog
 from apps.notifications.tasks import send_notification
@@ -138,6 +142,24 @@ class TestSendNotification:
         assert log.status == NotificationLog.Status.FAILED
         assert log.attempts == 1
         assert "500" in log.last_error
+
+    @responses.activate
+    def test_rate_limited_surfaces_discord_retry_after(self, alarm, channel):
+        # T43: 429 del webhook → DiscordRateLimited con el retry_after de
+        # Discord (en prod el task reintenta con ese countdown exacto y el
+        # rate_limit de 25/min evita volver a chocar)
+        channel.discord_channel_id = "999"
+        channel.save()
+        responses.post(WEBHOOK, status=429, json={"retry_after": 2.5})
+        log = NotificationLog.objects.create(alarm=alarm, channel=channel, event="opened")
+
+        with pytest.raises(DiscordRateLimited) as excinfo:
+            send_notification.run(log.id)
+
+        assert excinfo.value.retry_after == 2.5
+        log.refresh_from_db()
+        assert log.status != NotificationLog.Status.SENT
+        assert "rate limit" in log.last_error.lower()
 
     def test_missing_webhook_env_fails_without_retry(self, alarm, channel, monkeypatch):
         monkeypatch.delenv("webhook_discord", raising=False)

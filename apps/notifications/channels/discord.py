@@ -21,6 +21,15 @@ EVENT_LABELS = {
 TIMEOUT = 10
 
 
+class DiscordRateLimited(requests.RequestException):
+    """429 del webhook (límite ~30 msg/min). Lleva el retry_after que Discord
+    indica para reintentar exactamente cuando toca (T43)."""
+
+    def __init__(self, retry_after: float):
+        super().__init__(f"Discord rate limit: reintentar en {retry_after:.1f}s")
+        self.retry_after = retry_after
+
+
 class WebhookNotConfigured(Exception):
     """La env var del canal no existe: error de configuración, no reintentar."""
 
@@ -60,6 +69,12 @@ class DiscordChannel(BaseChannel):
 
     def send(self, payload: dict) -> int:
         response = requests.post(self._url(), json=payload, timeout=TIMEOUT)
+        if response.status_code == 429:
+            try:
+                retry_after = float(response.json().get("retry_after", 5.0))
+            except (ValueError, AttributeError):
+                retry_after = float(response.headers.get("Retry-After", 5.0))
+            raise DiscordRateLimited(retry_after)
         response.raise_for_status()
         return response.status_code
 
