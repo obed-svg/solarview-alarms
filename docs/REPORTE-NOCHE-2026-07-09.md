@@ -11,7 +11,12 @@ Punto de partida: `f21ee08` (T35).
   autoconsumo, derating 80 °C). DB scratch sincronizada: 77 proyectos, 314
   inversores, 0 autoconsumos, 37 minigranjas.
 - **23:08** — Primer tick: 35 s / 77 proyectos, 9 alarmas abiertas → análisis.
-- **23:5x** — T36 commiteado, runner reiniciado con los gates nocturnos.
+- **23:16** — T36 commiteado (`0905a8b`), runner reiniciado: las 9 falsas se
+  auto-resolvieron en el primer tick; quedan exactamente las 4 legítimas.
+- **23:41** — Chequeo: estable. Ticks de 34-42 s / 77 proyectos, `partial=0`,
+  sin excepciones. Ruido nocturno esperado en stats (68× `poa:no_verificable`
+  en reglas 2/5/6 por tick — semánticamente correcto; posible limpieza
+  opcional en la mañana con gates nocturnos si molesta en los EvaluationRun).
 
 ## Alarmas legítimas observadas
 
