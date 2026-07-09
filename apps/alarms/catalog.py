@@ -129,7 +129,7 @@ CATALOG = [
         "component_type": "meter",
         "default_severity": "high",
         "rule_group": "hourly",
-        "default_params": {"stale_minutes": 60},
+        "default_params": {"stale_minutes": 60, "solar_margin_minutes": 30},
     },
     {
         "code": "meter_no_increment",

@@ -33,7 +33,10 @@ class WeatherCommLost(BaseRule):
         params_early = ctx.params(self.code)
         margin = params_early.get("solar_margin_minutes", 30)
         if not ctx.is_solar_hours(margin_minutes=margin):
-            return [RuleOutcome(status="ok", reason="excluded:night")]
+            # not_computable y NO ok (T38): un ok nocturno auto-resolvería
+            # cada anochecer una alarma legítima de estación muerta → flap
+            # diario. De noche no se juzga: las abiertas se congelan.
+            return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
         weather = ctx.weather()
         if isinstance(weather, Unavailable):
@@ -152,12 +155,24 @@ class MeterCommLost(BaseRule):
     Caso "meter_silent" (T34): el oráculo confirmó nodos en Manager pero ni el
     histórico ni el live entregan datos → medidor presente y mudo. Se trata
     igual que un histórico vacío: si los inversores sí reportan, ES la alarma.
+
+    Solo evalúa en horario solar (T38): de noche el régimen de escritura de
+    quoia cambia por sistema — medidores que paran a las 20:30 exactas (misma
+    firma batch que weather) y otros que pasan a cadencia horaria (last_data
+    :30 → age 61 vs umbral 60 = flap nocturno garantizado). La staleness
+    nocturna no es accionable; not_computable congela las alarmas abiertas
+    sin abrir ni resolver en falso.
     """
 
     code = "meter_comm_lost"
     phase = 1
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        params_night = ctx.params(self.code)
+        margin = params_night.get("solar_margin_minutes", 30)
+        if not ctx.is_solar_hours(margin_minutes=margin):
+            return [RuleOutcome(status="not_computable", reason="excluded:night")]
+
         quoia = ctx.quoia()
         meter_silent = isinstance(quoia, Unavailable) and quoia.reason == "meter_silent"
         if isinstance(quoia, Unavailable) and not meter_silent:

@@ -82,13 +82,14 @@ class TestWeatherCommLost:
     def test_night_is_excluded_without_calling_api(self, project):
         # T36 (visto en producción): el escritor de weather del backend se
         # detiene de noche — 8 estaciones "stale" con el MISMO last_data_at.
-        # La staleness nocturna no es accionable y ni siquiera se consulta la API.
+        # T38: not_computable (no ok) — un ok nocturno auto-resolvería cada
+        # anochecer una alarma legítima de estación muerta (flap diario).
         ctx = make_ctx(project, weather_with_last_point(130),
                        now=datetime(2026, 7, 8, 23, 8))
 
         outcomes = WeatherCommLost().evaluate(ctx)
 
-        assert outcomes[0].status == "ok"
+        assert outcomes[0].status == "not_computable"
         assert outcomes[0].reason == "excluded:night"
         ctx.client.project_weather.assert_not_called()
 
@@ -100,7 +101,7 @@ class TestWeatherCommLost:
 
         outcomes = WeatherCommLost().evaluate(ctx)
 
-        assert outcomes[0].status == "ok"
+        assert outcomes[0].status == "not_computable"
         assert outcomes[0].reason == "excluded:night"
 
 

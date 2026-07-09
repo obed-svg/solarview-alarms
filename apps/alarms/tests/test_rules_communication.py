@@ -168,3 +168,17 @@ class TestMeterCommLost:
         ctx.client.quoia_live.side_effect = SolarViewAPIError("-1")
 
         assert MeterCommLost().evaluate(ctx)[0].status == "not_computable"
+
+    def test_night_freezes_without_calling_api(self, project):
+        # T38 (visto en producción 03:27): de noche los quoia cambian de
+        # régimen (paran a las 20:30 o pasan a cadencia horaria → age 61 vs
+        # umbral 60 = flap). De noche no se juzga ni se consulta la API; las
+        # alarmas abiertas se congelan (not_computable, no ok).
+        ctx = make_ctx(project, [live(1571, 3)], self.quoia_data(417))
+        ctx.now = datetime(2026, 7, 9, 3, 27)
+
+        outcomes = MeterCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "excluded:night"
+        ctx.client.quoia_history.assert_not_called()
