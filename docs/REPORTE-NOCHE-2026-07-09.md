@@ -81,6 +81,15 @@ Punto de partida: `f21ee08` (T35).
   `not_computable` (congelar) — un `ok` nocturno habría resuelto en falso
   cada anochecer las alarmas legítimas del día.
 
+- **06:23-06:43** — Segunda ola matinal: **161 falsas** (73 `inverter_comm_lost`
+  con `last_data_at=None` + 88 `availability_inputs_missing`). Los márgenes de
+  RELOJ de T23 (amanecer+45) no bastan: los SUN2000 arrancan por IRRADIANCIA —
+  a amanecer+45 muchos siguen legítimamente apagados. Fix T40 (`edc2758`):
+  reglas 4/12 exigen POA sostenida (>100 W/m², el mismo gate físico de la
+  regla 2) antes de exigir comunicación. Cambio semántico consciente en la 12:
+  POA faltante ya no dispara por inversor (lo cubren 15/11) — **revisar en la
+  mañana**. Las 161 se auto-resuelven con el gate nuevo.
+
 ## Para decidir en la mañana
 
 - **Backend**: agregar al reporte la irradiancia nocturna imposible de p118
