@@ -35,7 +35,8 @@ def project(db):
     )
 
 
-def make_ctx(project, poa_value=850.0, power_value=0.05, relay=None, weather_missing=True):
+def make_ctx(project, poa_value=850.0, power_value=0.05, relay=None, weather_missing=True,
+             now=NOW):
     """Contexto con POA desde power.irradiance (proyecto sin estación meteo)."""
     client = MagicMock()
     if weather_missing:
@@ -51,7 +52,7 @@ def make_ctx(project, poa_value=850.0, power_value=0.05, relay=None, weather_mis
         client.relay_now.side_effect = relay
     else:
         client.relay_now.return_value = relay
-    return EvaluationContext(project=project, client=client, now=NOW)
+    return EvaluationContext(project=project, client=client, now=now)
 
 
 @pytest.mark.django_db
@@ -69,6 +70,18 @@ class TestProjectNoGeneration:
         ctx = make_ctx(project, poa_value=850.0, power_value=450.0, relay=make_relay(True))
 
         assert ProjectNoGeneration().evaluate(ctx)[0].status == "ok"
+
+    def test_night_excluded_even_with_bogus_poa(self, project):
+        # T36 (caso real p118): /power/ entregó irradiance 295-370 W/m² a las
+        # 23:00 → CRITICAL falso. Fuera del horario solar local no se espera
+        # generación, diga lo que diga la señal.
+        ctx = make_ctx(project, poa_value=295.0, power_value=0.0,
+                       now=datetime(2026, 7, 8, 23, 8))
+
+        outcomes = ProjectNoGeneration().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
+        assert outcomes[0].reason == "excluded:night"
 
     def test_ok_with_low_irradiance(self, project):
         # amanecer/atardecer: POA bajo el umbral NO es falla

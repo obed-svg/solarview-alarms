@@ -31,13 +31,13 @@ def project(db):
     return Project.objects.create(external_id=146, name="El Son", synced_at=timezone.now())
 
 
-def make_ctx(project, weather):
+def make_ctx(project, weather, now=NOW):
     client = MagicMock()
     if isinstance(weather, Exception):
         client.project_weather.side_effect = weather
     else:
         client.project_weather.return_value = weather
-    return EvaluationContext(project=project, client=client, now=NOW)
+    return EvaluationContext(project=project, client=client, now=now)
 
 
 @pytest.mark.django_db
@@ -78,6 +78,30 @@ class TestWeatherCommLost:
         outcomes = WeatherCommLost().evaluate(make_ctx(project, SolarViewTimeout("slow")))
 
         assert outcomes[0].status == "not_computable"
+
+    def test_night_is_excluded_without_calling_api(self, project):
+        # T36 (visto en producción): el escritor de weather del backend se
+        # detiene de noche — 8 estaciones "stale" con el MISMO last_data_at.
+        # La staleness nocturna no es accionable y ni siquiera se consulta la API.
+        ctx = make_ctx(project, weather_with_last_point(130),
+                       now=datetime(2026, 7, 8, 23, 8))
+
+        outcomes = WeatherCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
+        assert outcomes[0].reason == "excluded:night"
+        ctx.client.project_weather.assert_not_called()
+
+    def test_dawn_margin_still_excluded(self, project):
+        # amanecer ~5:50 + margen 30: a las 6:00 aún no evalúa (el escritor
+        # nocturno apenas arranca; evita flap con datos de anoche)
+        ctx = make_ctx(project, weather_with_last_point(500),
+                       now=datetime(2026, 7, 8, 6, 0))
+
+        outcomes = WeatherCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
+        assert outcomes[0].reason == "excluded:night"
 
 
 @pytest.mark.django_db

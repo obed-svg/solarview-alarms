@@ -209,6 +209,7 @@ CATALOG = [
             "stale_minutes": 5,
             "expected_cadence_minutes": 1,
             "data_lag_minutes": 5,
+            "solar_margin_minutes": 30,
         },
     },
     {

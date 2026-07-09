@@ -17,12 +17,24 @@ class WeatherCommLost(BaseRule):
     Solo aplica a proyectos CON estación (los 404 "no existe estación" no
     generan outcome). Umbral: stale_minutes + data_lag_minutes sobre el
     timestamp más reciente de cualquier serie meteo.
+
+    Solo evalúa en horario solar (T36): la noche del 2026-07-08 las 8
+    estaciones de la flota quedaron "stale" con el MISMO last_data_at
+    (20:58:10, idéntico al segundo) — el escritor de weather del backend se
+    detiene de noche por sistema, no son estaciones muertas. La staleness
+    nocturna no es accionable; el margen evita el flap del amanecer mientras
+    el escritor arranca.
     """
 
     code = "weather_comm_lost"
     phase = 1
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        params_early = ctx.params(self.code)
+        margin = params_early.get("solar_margin_minutes", 30)
+        if not ctx.is_solar_hours(margin_minutes=margin):
+            return [RuleOutcome(status="ok", reason="excluded:night")]
+
         weather = ctx.weather()
         if isinstance(weather, Unavailable):
             if weather.reason == "not_associated":

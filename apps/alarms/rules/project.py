@@ -30,6 +30,13 @@ class ProjectNoGeneration(BaseRule):
     phase = 3
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        # Cordura física (T36): fuera del horario solar LOCAL no se espera
+        # generación, diga lo que diga la señal de POA — visto en producción:
+        # /power/ de un proyecto entregando irradiance 295-370 W/m² a las 23:00
+        # (dato del backend sin sentido para su longitud) → CRITICAL falso.
+        if not ctx.is_solar_hours():
+            return [RuleOutcome(status="ok", reason="excluded:night")]
+
         if ctx.in_maintenance():
             return [RuleOutcome(status="ok", reason="excluded:maintenance")]
 
