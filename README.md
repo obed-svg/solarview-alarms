@@ -62,6 +62,10 @@ Llaves del `.env` (nunca commitear):
 - Umbrales COX: defaults en el catálogo (admin → Alarm rules); override por
   proyecto en Rule configs.
 - Mantenimientos programados (excluyen alarmas): admin → Maintenance windows.
+- Sensores faltantes deliberados: regla puntual por proyecto → admin → Rule
+  configs (`enabled=No`); estación meteo completa NO confiable (reporta 0) →
+  admin → Projects → `ignore_weather_station` (usa la irradiancia de /power/
+  y las reglas de estación no aplican).
 
 ## Tests
 

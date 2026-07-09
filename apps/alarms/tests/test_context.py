@@ -70,6 +70,42 @@ class TestUnavailable:
 
 
 @pytest.mark.django_db
+class TestIgnoreWeatherStation:
+    """T44: estación presente en la API pero marcada NO confiable en admin
+    (sensores faltantes que reportan 0 envenenarían el POA de la flota)."""
+
+    def test_ignored_station_is_not_associated_without_api_call(self, db):
+        project = Project.objects.create(
+            external_id=146, name="El Son", ignore_weather_station=True,
+            synced_at=timezone.now(),
+        )
+        client = MagicMock()
+        ctx = make_ctx(project=project, client=client)
+
+        weather = ctx.weather()
+
+        assert isinstance(weather, Unavailable)
+        assert weather.reason == "not_associated"
+        client.project_weather.assert_not_called()
+
+    def test_poa_falls_back_to_power_irradiance(self, db):
+        from integrations.solarview.schemas import PowerSeries
+
+        project = Project.objects.create(
+            external_id=146, name="El Son", ignore_weather_station=True,
+            synced_at=timezone.now(),
+        )
+        client = MagicMock()
+        irradiance = {datetime(2026, 7, 8, 11, 55): 812.0}
+        client.project_power.return_value = PowerSeries(
+            unit="kW", power={}, irradiance=irradiance
+        )
+        ctx = make_ctx(project=project, client=client)
+
+        assert ctx.poa_series() == irradiance
+
+
+@pytest.mark.django_db
 class TestQuoiaOracle:
     """El live (/quoia_measurements/) como oráculo de existencia del medidor
     cuando el histórico falla (T29)."""

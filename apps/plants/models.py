@@ -19,6 +19,12 @@ class Project(models.Model):
     # Autoconsumo: la energía se consume localmente → las reglas de frontera
     # (9, 10, 18) no aplican (decisión del usuario 2026-07-08, ver T35).
     is_self_consumption = models.BooleanField(default=False)
+    # Override operativo (T44, decisión del usuario): estación meteo presente
+    # en la API pero NO confiable (sensores faltantes que reportan 0 — un POA
+    # en 0 envenena todas las reglas gateadas por irradiancia). True = tratar
+    # el proyecto como SIN estación: POA desde /power/, reglas 14/15/16 no
+    # aplican. sync_catalog NUNCA lo toca (igual que monitoring_enabled).
+    ignore_weather_station = models.BooleanField(default=False)
     monitoring_enabled = models.BooleanField(default=True)
     raw = models.JSONField(default=dict, blank=True)
     synced_at = models.DateTimeField()

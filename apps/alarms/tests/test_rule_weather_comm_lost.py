@@ -74,6 +74,17 @@ class TestWeatherCommLost:
 
         assert outcomes == []
 
+    def test_ignored_station_produces_no_outcomes(self, project):
+        # T44: estación no confiable marcada en admin = como si no existiera
+        project.ignore_weather_station = True
+        project.save(update_fields=["ignore_weather_station"])
+        ctx = make_ctx(project, weather_with_last_point(500))
+
+        outcomes = WeatherCommLost().evaluate(ctx)
+
+        assert outcomes == []
+        ctx.client.project_weather.assert_not_called()
+
     def test_api_error_is_not_computable(self, project):
         outcomes = WeatherCommLost().evaluate(make_ctx(project, SolarViewTimeout("slow")))
 

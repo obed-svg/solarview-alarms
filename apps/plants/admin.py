@@ -6,8 +6,9 @@ from .models import Inverter, InverterStateObservation, MaintenanceWindow, Proje
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
     list_display = ("external_id", "name", "is_minifarm", "is_self_consumption",
-                    "monitoring_enabled", "synced_at")
-    list_filter = ("monitoring_enabled", "is_minifarm", "is_self_consumption")
+                    "ignore_weather_station", "monitoring_enabled", "synced_at")
+    list_filter = ("monitoring_enabled", "is_minifarm", "is_self_consumption",
+                   "ignore_weather_station")
     search_fields = ("name", "external_id", "plant_code")
 
 

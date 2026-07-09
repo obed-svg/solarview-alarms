@@ -78,6 +78,13 @@ class EvaluationContext:
         )
 
     def weather(self):
+        # T44: estación marcada como NO confiable en admin (sensores faltantes
+        # que reportan 0 — envenenarían el POA de todas las reglas). Se trata
+        # como "sin estación": reglas 14/15/16 no aplican y poa_series cae al
+        # fallback de /power/. Ni siquiera se consulta la API.
+        if self.project.ignore_weather_station:
+            return Unavailable("not_associated")
+
         day = self.now.strftime("%Y-%m-%d")
         return self._cached(
             "weather",
