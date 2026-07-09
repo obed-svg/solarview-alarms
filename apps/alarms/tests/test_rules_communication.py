@@ -12,9 +12,14 @@ from integrations.solarview.exceptions import (
     SolarViewNotAssociated,
     SolarViewTimeout,
 )
-from integrations.solarview.schemas import InverterLive
+from integrations.solarview.schemas import InverterLive, PowerSeries
 
 NOW = datetime(2026, 7, 8, 12, 0)
+
+
+def poa_series(value=850.0):
+    """Irradiancia sostenida vía /power/ (proyecto sin estación meteo)."""
+    return {NOW - timedelta(minutes=m): value for m in range(0, 25)}
 
 
 def live(iid, minutes_ago, dev_name=None) -> InverterLive:
@@ -30,7 +35,7 @@ def project(db):
     return Project.objects.create(external_id=146, name="El Son", synced_at=timezone.now())
 
 
-def make_ctx(project, inverters=None, quoia=None):
+def make_ctx(project, inverters=None, quoia=None, poa=None):
     client = MagicMock()
     if isinstance(inverters, Exception):
         client.project_inverters.side_effect = inverters
@@ -40,6 +45,12 @@ def make_ctx(project, inverters=None, quoia=None):
         client.quoia_history.side_effect = quoia
     else:
         client.quoia_history.return_value = quoia or {}
+    # T40: la regla 4 exige POA sostenida (los inversores arrancan por
+    # irradiancia); default = mediodía despejado vía power.irradiance
+    client.project_weather.side_effect = SolarViewNotAssociated("no estación")
+    client.project_power.return_value = PowerSeries(
+        unit="kW", power={}, irradiance=poa if poa is not None else poa_series()
+    )
     return EvaluationContext(project=project, client=client, now=NOW)
 
 

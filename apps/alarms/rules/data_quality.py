@@ -12,6 +12,7 @@ from apps.alarms.models import NonComputableInterval
 from integrations.solarview.schemas import parse_ts
 
 from .base import BaseRule, RuleOutcome, register
+from .helpers import poa_sustained_above
 
 INTERVAL_MINUTES = 15  # intervalo de registro IEC 61724
 MIN_POINTS = 3
@@ -356,6 +357,14 @@ class AvailabilityInputsMissing(BaseRule):
             margin_minutes=params_comm.get("solar_margin_minutes", 45)
         ):
             return []
+
+        # T40: mismo gate físico por POA que la regla 4 — los inversores
+        # arrancan por irradiancia, no por reloj (ola matinal de 88 falsas)
+        poa_ok = poa_sustained_above(ctx, params_comm)
+        if poa_ok is None:
+            return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
+        if not poa_ok:
+            return [RuleOutcome(status="ok", reason="excluded:low_irradiance")]
 
         inverters = ctx.inverters_live()
         if isinstance(inverters, Unavailable):

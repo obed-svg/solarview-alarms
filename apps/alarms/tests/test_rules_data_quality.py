@@ -261,15 +261,19 @@ class TestAvailabilityInputsMissing:
         assert interval.metric == "availability"
         assert interval.inverter.external_id == 1571
 
-    def test_missing_poa_marks_all_inverters(self, project):
+    def test_missing_poa_is_not_computable(self, project):
+        # T40: sin POA verificable no se puede saber si los inversores deben
+        # estar despiertos (arrancan por irradiancia) → not_computable. La
+        # señal de POA rota a mediodía la dan las reglas 15/11, no esta.
         ctx = make_ctx(project, inverters=self.inverters(),
                        weather=SolarViewNotAssociated("no estación"),
                        power=power_of(series(30, flat(300), step=5)))  # sin irradiance
 
         outcomes = AvailabilityInputsMissing().evaluate(ctx)
 
-        assert outcomes[0].status == "firing"
-        assert "poa" in outcomes[0].evidence["missing_inputs"]
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "poa:no_verificable"
+        assert NonComputableInterval.objects.count() == 0
 
     def test_night_does_not_evaluate(self, project):
         ctx = make_ctx(project, now=NIGHT, inverters=self.inverters(),

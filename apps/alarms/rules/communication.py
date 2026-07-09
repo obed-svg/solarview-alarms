@@ -8,6 +8,7 @@ from apps.alarms.context import Unavailable
 from integrations.solarview.schemas import parse_ts
 
 from .base import BaseRule, RuleOutcome, register
+from .helpers import poa_sustained_above
 
 
 @register
@@ -99,6 +100,17 @@ class InverterCommLost(BaseRule):
         # evita la ola nocturna de ~47 falsas al anochecer)
         if not ctx.is_solar_hours(margin_minutes=params.get("solar_margin_minutes", 45)):
             return []
+
+        # T40 (ola matinal real: 73 falsas a las 06:23-06:43): los SUN2000
+        # arrancan por IRRADIANCIA, no por reloj — a amanecer+45 muchos siguen
+        # legítimamente apagados. Solo se les exige comunicar cuando hay POA
+        # sostenida (mismo gate físico que la regla 2). POA no verificable al
+        # alba (weather aún dormido) → not_computable, sin falsas.
+        poa_ok = poa_sustained_above(ctx, params)
+        if poa_ok is None:
+            return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
+        if not poa_ok:
+            return [RuleOutcome(status="ok", reason="excluded:low_irradiance")]
 
         inverters = ctx.inverters_live()
         if isinstance(inverters, Unavailable):

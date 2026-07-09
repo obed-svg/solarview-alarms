@@ -70,6 +70,8 @@ CATALOG = [
         "default_severity": "high",
         "rule_group": "fast",
         "default_params": {
+            "poa_min_wm2": 100,
+            "persistence_minutes": 15,
             "stale_minutes": 15,
             "expected_cadence_minutes": 5,
             "data_lag_minutes": 5,
