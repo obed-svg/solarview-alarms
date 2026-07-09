@@ -15,7 +15,14 @@ apps/notifications/       Canal Discord + dispatcher idempotente + log con chann
 config/                   Settings (django-environ), Celery (colas + beat)
 ```
 
-Documentación viva del proceso: `ROADMAP.md` (tareas, decisiones y gotchas).
+Documentación:
+- `docs/DISENO.md` — diseño completo: modelos campo por campo, motor de
+  evaluación (contrato de regla, EvaluationContext, semántica tri-estado),
+  mapa alarma→endpoints y decisiones de arquitectura.
+- `ROADMAP.md` — historia de implementación: tareas, gotchas de la API real y
+  pendientes que requieren acción del backend (sección Bloqueadas).
+- Cada regla documenta su lógica y exclusiones en su docstring
+  (`apps/alarms/rules/`); las descripciones del catálogo se ven en el admin.
 
 ## Setup
 
