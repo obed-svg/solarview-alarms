@@ -46,6 +46,17 @@ Punto de partida: `f21ee08` (T35).
   al persistir, lock de escritura en el runner (las escrituras de alarmas se
   serializan; el fetch de API sigue paralelo). Runner reiniciado 00:26.
 
+- **01:22** — Detectado: p99 y p119 evaluando reglas a la 1 AM. Causa:
+  **lat=-1, lon=-1** (centinela "no configurado" de la API) — astral no
+  explota, pone el amanecer a la ~01:00 local y corre la ventana solar ~5 h:
+  evaluaban de madrugada y quedaban **gateados en su tarde real** (hueco de
+  detección diario). Fix T37: amanecer calculado fuera de [04:00, 09:00)
+  local = coordenadas no creíbles → horario fijo.
+- **01:23** — Segundo hallazgo: había DOS runners vivos en paralelo (un kill
+  anterior falló silenciosamente) — explicaba ticks duplicados y un lock más.
+  Muerto el viejo por PID; queda solo el del write-lock. Los hourly de 00:23 y
+  01:19 con el write-lock: `partial=0`, cero errores.
+
 ## Para decidir en la mañana
 
 - **Backend**: agregar al reporte la irradiancia nocturna imposible de p118

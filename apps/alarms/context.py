@@ -185,8 +185,17 @@ class EvaluationContext:
             # coordenadas basura (visto: proyecto con lat/lon invertidas por la
             # API → "lat -75" = Antártida y astral explota). Fallback horario fijo.
             return fixed_window()
+        sunrise = times["sunrise"]
+        if not 4 <= sunrise.hour < 9:
+            # T37: coordenadas centinela/basura que NO explotan (visto:
+            # lat=-1, lon=-1 = "no configurado" → astral pone el amanecer a la
+            # ~01:00 hora local y la ventana solar queda corrida ~5 h: reglas
+            # evaluando de madrugada y gateadas en la tarde real). Un amanecer
+            # fuera de [04:00, 09:00) local no es creíble para la zona horaria
+            # del proyecto → horario fijo.
+            return fixed_window()
         aware = at.replace(tzinfo=self.tz)
-        return times["sunrise"] + margin <= aware <= times["sunset"] - margin
+        return sunrise + margin <= aware <= times["sunset"] - margin
 
     def inverter_model(self, external_id: int):
         """Fila plants.Inverter por external_id (None si no está sincronizada)."""

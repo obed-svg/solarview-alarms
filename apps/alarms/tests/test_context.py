@@ -208,6 +208,20 @@ class TestHelpers:
         assert ctx.is_solar_hours() is True  # mediodía en ventana fija, sin explotar
         assert ctx.is_solar_hours(margin_minutes=45) is True
 
+    def test_sentinel_coordinates_fall_back_to_fixed_window(self):
+        # T37 (visto en producción 01:22 AM): lat=-1, lon=-1 = "no configurado"
+        # NO explota en astral — pone el amanecer a la ~01:00 local y corre la
+        # ventana solar ~5 h. Amanecer implausible → horario fijo.
+        project = Project.objects.create(
+            external_id=99, name="Hacienda Santa Ana", latitude=-1, longitude=-1,
+            synced_at=timezone.now(),
+        )
+        ctx_night = make_ctx(project=project, now=datetime(2026, 7, 9, 1, 22))
+        assert ctx_night.is_solar_hours() is False  # madrugada NO es día
+
+        ctx_noon = make_ctx(project=project, now=datetime(2026, 7, 9, 12, 0))
+        assert ctx_noon.is_solar_hours() is True  # su tarde real sí evalúa
+
     def test_in_maintenance_uses_windows(self):
         project = make_project()
         MaintenanceWindow.objects.create(
