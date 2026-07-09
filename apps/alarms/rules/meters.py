@@ -41,10 +41,16 @@ def _last_full_hour(ctx, lag_minutes: int = 5):
     return hour_end - timedelta(hours=1), hour_end
 
 
+EDGE_TOLERANCE = timedelta(minutes=20)  # una cadencia de 15 min + margen
+
+
 def _frontier_energy_between(quoia_raw: dict, start, end) -> float | None:
     """Suma de los intervalos quoia dentro de (start, end], tolerando la
-    deriva de segundos de las etiquetas. None si la cobertura es insuficiente:
-    menos de MIN_INTERVAL_POINTS puntos o que abarquen menos de media hora."""
+    deriva de segundos de las etiquetas. None si la cobertura no llega a AMBOS
+    bordes de la hora (T48, caso real Joropo 17-18h: su medidor dejó de
+    escribir a mitad de hora — patrón nocturno que arranca temprano — y la
+    suma coja fabricó un 'déficit' del 72% en una planta sana). Un medidor
+    que no cubre la hora completa es not_computable, no un mismatch."""
     lo, hi = start + LABEL_DRIFT, end + LABEL_DRIFT
     points = []
     for key, payload in quoia_raw.items():
@@ -55,8 +61,8 @@ def _frontier_energy_between(quoia_raw: dict, start, end) -> float | None:
     if len(points) < MIN_INTERVAL_POINTS:
         return None
     points.sort()
-    span_minutes = (points[-1][0] - points[0][0]).total_seconds() / 60
-    if span_minutes < (end - start).total_seconds() / 60 / 2:
+    first_ts, last_ts = points[0][0], points[-1][0]
+    if first_ts > lo + EDGE_TOLERANCE or last_ts < hi - EDGE_TOLERANCE:
         return None
     return sum(v for _, v in points)
 

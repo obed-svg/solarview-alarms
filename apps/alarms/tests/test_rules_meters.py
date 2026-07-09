@@ -79,7 +79,7 @@ class TestMeterNoIncrement:
         assert MeterNoIncrement().evaluate(ctx)[0].status == "ok"
 
     def test_sparse_hour_is_not_computable(self, project):
-        # 2 puntos pegados al cierre: abarcan < media hora → no sumar a ciegas
+        # 2 puntos pegados al cierre: no cubren el inicio de la hora
         sparse = {
             (HOUR_START + timedelta(minutes=m, seconds=4)).strftime("%Y-%m-%d %H:%M:%S"): {
                 "value": 8.0, "unit": "kWh",
@@ -87,6 +87,23 @@ class TestMeterNoIncrement:
             for m in (50, 60)
         }
         ctx = make_ctx(project, quoia=sparse)
+
+        outcomes = MeterNoIncrement().evaluate(ctx)
+
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "quoia:ventana_insuficiente"
+
+    def test_meter_stopping_mid_hour_is_not_computable(self, project):
+        # T48 (caso real Joropo 17-18h): medidor con patrón nocturno temprano
+        # deja de escribir a mitad de hora → suma coja = 'déficit' fabricado.
+        # Cobertura debe llegar a AMBOS bordes.
+        trailing_off = {
+            (HOUR_START + timedelta(minutes=m, seconds=4)).strftime("%Y-%m-%d %H:%M:%S"): {
+                "value": 11.0, "unit": "kWh",
+            }
+            for m in (15, 30)  # solo la primera media hora
+        }
+        ctx = make_ctx(project, quoia=trailing_off)
 
         outcomes = MeterNoIncrement().evaluate(ctx)
 
