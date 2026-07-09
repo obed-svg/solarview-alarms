@@ -101,9 +101,10 @@ class EvaluationContext:
         )
 
     def quoia(self):
-        day = self.now.strftime("%Y-%m-%d")
+        # sin fechas: el endpoint devuelve las últimas ~24 h y CUALQUIER query
+        # param provoca un 500 del backend (ver client.quoia_history)
         return self._cached(
-            "quoia", lambda: self.client.quoia_history(self.project.external_id, day, day)
+            "quoia", lambda: self.client.quoia_history(self.project.external_id)
         )
 
     def poa_series(self) -> TimeSeries | Unavailable:

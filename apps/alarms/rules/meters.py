@@ -1,10 +1,11 @@
 """Fase 3 — reglas de medidor de frontera (quoia).
 
-⚠️ Estado T03/T18: el endpoint quoia devuelve 500 en TODOS los proyectos
-(bug del backend). Estas reglas están implementadas contra la forma documentada
-del payload ({ts: {value, unit}}, contador acumulado) y viven en not_computable
-mientras quoia siga caído. Validar contra datos reales cuando lo arreglen
-(pendiente en Bloqueadas del ROADMAP).
+Payload real VALIDADO (2026-07-08, proyecto 108 y 25 más): {ts: {value, unit}}
+donde `value` es la energía kWh DEL INTERVALO (~15 min, cadencia variable por
+proyecto), NO un contador acumulado — 0.0 de noche, sigue la curva solar.
+El endpoint devuelve las últimas ~24 h y NO acepta parámetros de fecha (ver
+client.quoia_history). En proyectos cuyo quoia sigue roto server-side estas
+reglas viven en not_computable (comportamiento correcto, sin ruido).
 """
 
 from datetime import timedelta
@@ -16,23 +17,28 @@ from integrations.solarview.schemas import parse_ts
 from .base import BaseRule, RuleOutcome, register
 from .helpers import poa_sustained_above
 
-MIN_COUNTER_POINTS = 2
+MIN_INTERVAL_POINTS = 2
 
 
-def _frontier_delta_kwh(ctx, quoia_raw: dict, window_minutes: int) -> float | None:
-    """ΔE del contador acumulado de frontera dentro de la ventana. None si no
-    hay puntos suficientes."""
+def _frontier_energy_kwh(ctx, quoia_raw: dict, window_minutes: int) -> float | None:
+    """Energía de frontera en la ventana: SUMA de los intervalos quoia dentro
+    de ella. None si la cobertura es insuficiente — menos de
+    MIN_INTERVAL_POINTS puntos o puntos que abarcan menos de media ventana
+    (sumar con huecos grandes subestima y produciría falsos "cero energía")."""
     cutoff = ctx.now - timedelta(minutes=window_minutes)
     points = []
     for key, payload in quoia_raw.items():
         ts = parse_ts(key)
         if ts is not None and ts >= cutoff and isinstance(payload, dict):
-            points.append((ts, payload.get("value")))
-    points.sort()
-    values = [v for _, v in points if v is not None]
-    if len(values) < MIN_COUNTER_POINTS:
+            if payload.get("value") is not None:
+                points.append((ts, payload["value"]))
+    if len(points) < MIN_INTERVAL_POINTS:
         return None
-    return values[-1] - values[0]
+    points.sort()
+    span_minutes = (points[-1][0] - points[0][0]).total_seconds() / 60
+    if span_minutes < window_minutes / 2:
+        return None
+    return sum(v for _, v in points)
 
 
 def _inverter_energy_kwh(ctx, window_minutes: int) -> float | None:
@@ -51,7 +57,7 @@ def _inverter_energy_kwh(ctx, window_minutes: int) -> float | None:
 
 @register
 class MeterNoIncrement(BaseRule):
-    """Regla 9: el contador de frontera no aumenta aunque los inversores generan
+    """Regla 9: la frontera no registra energía aunque los inversores generan
     y hay POA. Sin medidor quoia la regla no aplica."""
 
     code = "meter_no_increment"
@@ -75,8 +81,8 @@ class MeterNoIncrement(BaseRule):
         if not poa_ok:
             return [RuleOutcome(status="ok", reason="excluded:low_irradiance")]
 
-        delta = _frontier_delta_kwh(ctx, quoia, window)
-        if delta is None:
+        frontier_energy = _frontier_energy_kwh(ctx, quoia, window)
+        if frontier_energy is None:
             return [RuleOutcome(status="not_computable", reason="quoia:ventana_insuficiente")]
 
         inverter_energy = _inverter_energy_kwh(ctx, window)
@@ -85,12 +91,15 @@ class MeterNoIncrement(BaseRule):
                 RuleOutcome(status="not_computable", reason="generation:no_disponible")
             ]
 
-        if delta <= params["delta_zero_kwh"] and inverter_energy > params["delta_zero_kwh"]:
+        if (
+            frontier_energy <= params["delta_zero_kwh"]
+            and inverter_energy > params["delta_zero_kwh"]
+        ):
             return [
                 RuleOutcome(
                     status="firing",
                     evidence={
-                        "delta_kwh": round(delta, 2),
+                        "frontier_energy_kwh": round(frontier_energy, 2),
                         "inverter_energy_kwh": round(inverter_energy, 2),
                         "window_minutes": window,
                     },
@@ -117,7 +126,7 @@ class MeterInverterMismatch(BaseRule):
         params = ctx.params(self.code)
         window = params["window_minutes"]
 
-        frontier = _frontier_delta_kwh(ctx, quoia, window)
+        frontier = _frontier_energy_kwh(ctx, quoia, window)
         if frontier is None:
             return [RuleOutcome(status="not_computable", reason="quoia:ventana_insuficiente")]
 

@@ -135,8 +135,9 @@ class MeterCommLost(BaseRule):
 
     Solo dispara si los INVERSORES sí reportan (si todo está caído no se puede
     culpar al medidor → not_computable). Proyecto sin medidor quoia: no aplica.
-    NOTA T03: quoia devuelve 500 en todos los proyectos hoy — mientras siga así
-    esta regla vivirá en not_computable, que es el comportamiento correcto.
+    Quoia real validado 2026-07-08 (26 proyectos con datos, cadencia ~15 min);
+    en los proyectos cuyo quoia sigue 500 server-side esta regla vive en
+    not_computable, que es el comportamiento correcto.
     """
 
     code = "meter_comm_lost"

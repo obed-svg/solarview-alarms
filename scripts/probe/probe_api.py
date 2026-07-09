@@ -161,9 +161,10 @@ def main() -> int:
         {"date_from": f"{today} 00:00:00-05:00", "date_to": f"{today} 23:59:59-05:00"},
     )
     fetch(headers, base_url, f"project/{pid}/relay/", "relay_now")
+    # SIN params: cualquier query param dispara el 500 `updated_node` del backend
     quoia = fetch(
         headers, base_url, f"project/{pid}/quoia_measurements_history/",
-        "quoia_history_today", {"init_date": today, "end_date": today},
+        "quoia_history_today",
     )
     fetch(
         headers, base_url, f"project/{pid}/generation/",

@@ -40,6 +40,25 @@ class TestParseTs:
         assert parse_ts(None) is None
 
 
+class TestQuoiaHistory:
+    @responses.activate
+    def test_sends_no_query_params_and_returns_interval_dict(self):
+        # fixture real (proyecto 108, 2026-07-08). CUALQUIER query param dispara
+        # un 500 del backend (updated_node) → la request debe ir SIN params.
+        responses.get(
+            f"{BASE}/monitoring/project/108/quoia_measurements_history/",
+            json=fixture("quoia_history"),
+        )
+
+        result = make_client().quoia_history(108)
+
+        assert "?" not in responses.calls[0].request.url
+        # forma real: {ts: {value: kWh_del_intervalo, unit}}, ~15 min, ~24 h
+        assert result["2026-07-08 11:30:00"] == {"value": 212.98, "unit": "kWh"}
+        assert all(parse_ts(key) is not None for key in result)
+        assert all(set(point) == {"value", "unit"} for point in result.values())
+
+
 class TestListProjects:
     @responses.activate
     def test_dirty_numeric_fields_become_none(self):

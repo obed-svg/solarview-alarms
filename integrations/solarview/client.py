@@ -130,9 +130,15 @@ class SolarViewClient:
         raw = self.get(f"project/{project_id}/relay/historical/", params=params)
         return {ts: vals for ts, vals in ((k, v) for k, v in (raw or {}).items())}
 
-    def quoia_history(self, project_id: int, init_date: str, end_date: str):
-        params = {"init_date": init_date, "end_date": end_date}
-        return self.get(f"project/{project_id}/quoia_measurements_history/", params=params)
+    def quoia_history(self, project_id: int):
+        """Mediciones del medidor de frontera (quoia): {ts: {value, unit}} con la
+        energía POR INTERVALO (~15 min) de las últimas ~24 h.
+
+        ⚠️ NUNCA enviar parámetros de fecha: cualquier query param dispara un 500
+        del backend (`cannot access local variable 'updated_node'`) incluso en
+        proyectos cuyo quoia funciona (validado 2026-07-08). Sin params responde
+        200 con datos en los proyectos con medidor sano."""
+        return self.get(f"project/{project_id}/quoia_measurements_history/")
 
     def generation(self, project_id: int, start_date: str, end_date: str) -> GenerationSummary:
         params = {"start_date": start_date, "end_date": end_date}

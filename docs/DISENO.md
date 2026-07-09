@@ -229,9 +229,9 @@ Para implementar exclusiones tipo "no clasificar como falla del inversor si hay 
 | 5 | `string_zero_current` | string | `/project/{id}/measurements-dc/?variable=cs` (I≈0, otros >1A), `/project/{id}/inverter/` (activo) |
 | 6 | `string_low_current` | string | `/project/{id}/measurements-dc/?variable=cs` (<80% promedio mismo inversor), POA |
 | 7 | `dc_isolation_low` | inversor | `/project/{id}/inverter/` (`state` con código de aislamiento — verificar en sondeo) |
-| 8 | `meter_comm_lost` | proyecto | `/project/{id}/quoia_measurements_history/` (staleness) vs `/project/{id}/inverter/` (inversores sí reportan) |
-| 9 | `meter_no_increment` | proyecto | `/quoia_measurements_history/` (ΔE≈0/60min), `/generation/` (inversores generando), POA |
-| 10 | `meter_inverter_mismatch` | proyecto | `/generation/` vs `/quoia_measurements_history/` por hora; >3% alerta, >5% alta |
+| 8 | `meter_comm_lost` | proyecto | `/project/{id}/quoia_measurements_history/` SIN params (staleness) vs `/project/{id}/inverter/` (inversores sí reportan) |
+| 9 | `meter_no_increment` | proyecto | `/quoia_measurements_history/` SIN params (Σ energía por intervalo ≈0/60min), `/generation/` (inversores generando), POA |
+| 10 | `meter_inverter_mismatch` | proyecto | `/generation/` vs Σ intervalos de `/quoia_measurements_history/` por hora; >3% alerta, >5% alta |
 | 11 | `pr_inputs_missing` | proyecto | Derivada: presencia de energía AC (quoia), POA, P_DC (measurements-dc) y T_mod (`temperature_POA`) cuando el proyecto tiene estación. |
 | 12 | `availability_inputs_missing` | inversor | Derivada: POA válida + potencia/estado/timestamp de `/project/{id}/inverter/` |
 | 13 | `data_frozen` | proyecto/señal | Ventanas de `/power/` y `/weather/` (3 intervalos idénticos en horario solar; sin temperatura de módulo) |
@@ -304,6 +304,13 @@ sección Post-COMPLETADO):
   ÷100 si viene en %; ambigüedad irresoluble → `not_computable` (nunca
   adivinar). `evidence` conserva `kw_raw` + notas de normalización para
   auditoría.
+- **Quoia descifrado** (T28): el `_history` funciona **sin parámetros de
+  fecha** (cualquier query param dispara un 500 del backend) y devuelve las
+  últimas ~24 h. El payload es energía POR INTERVALO (~15 min), no contador
+  acumulado → la energía de frontera en ventana es la SUMA de intervalos
+  (con guardia de cobertura), no `último − primero`. 26/77 proyectos
+  entregan datos reales; el endpoint live `/quoia_measurements/` existe pero
+  está roto server-side (500 `"-1"` en todos).
 
 ## Arquitectura de ejecución con `/loop`
 
