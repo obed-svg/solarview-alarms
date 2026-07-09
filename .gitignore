@@ -13,6 +13,7 @@ staticfiles/
 # Env / secrets
 .env
 .env.*
+!.env.example
 
 # Tooling
 .pytest_cache/

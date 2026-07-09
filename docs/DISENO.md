@@ -13,7 +13,7 @@ Repo greenfield (`solarview-alarms`): sistema que lee datos de la API de monitor
 - Cada notificación guarda el **channel ID** de Discord al que se envió (trazabilidad si cambia el canal)
 - **Correcciones de API**: `/inverter/{id}/` NO recibe `variable` (error de la doc). Voltajes DC → `/project/{id}/measurements-dc/`; AC → `/project/{id}/measurement/`
 - **Frecuencias reales**: inversores cada 5 min; weather y medidor (quoia) varían de 1 min a 1 h → umbrales de "sin comunicación" configurables por proyecto, se calibran tras sondear las APIs
-- **T_mod es incierto** → todo lo que dependa de temperatura de módulo se ignora por ahora (regla 16 deshabilitada, regla 11 sin T_mod)
+- **T_mod era incierto en el diseño inicial** → resuelto después (T22): T_mod = `temperature_POA` (sensor del panel, confirmado por el usuario). Regla 16 activa desde la migración 0004; la regla 11 exige T_mod cuando el proyecto tiene estación
 - **Sondear las APIs reales ANTES de implementar** cada consumo (token ya en `.env`)
 - Implementación ejecutada con **`/loop`** (ver sección final)
 
@@ -75,7 +75,7 @@ Registra "este proyecto/inversor está en mantenimiento de X a Y". Es la fuente 
 | `category` | choices | Proyecto / Inversor / DC-strings / Medidores / Datos / Meteo / Red / Calidad / O&M. |
 | `component_type` | choices | Sobre qué se dispara: PROJECT, INVERTER, STRING, METER, WEATHER_STATION, RELAY. |
 | `default_severity` | choices | Crítica/Alta/Media, del Excel. |
-| `enabled` | bool | Interruptor global. Las reglas 19 (THD) y 16 (T_mod) se seedean en `False`. |
+| `enabled` | bool | Interruptor global. La regla 19 (THD) vive en `False` (la API no expone THD); la 16 (T_mod) se seedeó en `False` y se habilitó por migración (0004) al definirse T_mod = `temperature_POA`. |
 | `default_params` | JSON | Umbrales por defecto (criterios COX): `{"poa_min_wm2": 100, "persistence_minutes": 15, ...}`. En JSON porque cada regla tiene parámetros distintos. |
 | `rule_group` | fast/hourly | Con qué periodicidad se evalúa: cada 5 min o cada hora. |
 | `auto_resolve` | bool | Si la alarma se cierra sola cuando la condición desaparece. |
@@ -158,7 +158,7 @@ Si algún día se necesita canal-por-proyecto, se agrega un M2M a `plants.Projec
 
 ### "Contrato de regla" (pregunta 5)
 
-"Contrato" = la interfaz que TODA regla debe cumplir para que el motor las trate uniformemente. Cada una de las ~17 alarmas es una clase Python en `apps/alarms/rules/`, y todas se ven así:
+"Contrato" = la interfaz que TODA regla debe cumplir para que el motor las trate uniformemente. Cada una de las 19 reglas del engine es una clase Python en `apps/alarms/rules/` (la 20, SLA, corre aparte en `check_sla`), y todas se ven así:
 
 ```python
 @register                                   # se anota en un dict global {code: clase}
@@ -189,7 +189,7 @@ Problema que resuelve: en un tick, las ~17 reglas de un proyecto necesitan datos
 
 `EvaluationContext` es un objeto que se crea UNA vez por (proyecto, tick) y centraliza el acceso a datos con **cache perezoso**: la primera regla que pide `ctx.poa_window(20)` dispara el request real; las siguientes reciben la copia en memoria. Resultado: ~6-8 requests por proyecto por tick, y las reglas quedan limpias (piden datos semánticos, no URLs).
 
-Además expone helpers compartidos: `ctx.params(code)` (umbrales resueltos), `ctx.is_solar_hours()` (astral con lat/lon), `ctx.in_maintenance(inverter)` (consulta MaintenanceWindow), `ctx.flag_active("inverter_comm_lost", "inv:5")` (¿otra regla ya disparó en este tick? — para exclusiones). Si un request a la API falla, el método devuelve un sentinel `Unavailable(reason)` en vez de explotar: cada regla que dependía de ese dato reporta `not_computable` y las demás siguen.
+Además expone helpers compartidos: `ctx.params(code)` (umbrales resueltos), `ctx.is_solar_hours(margin_minutes=N)` (astral con lat/lon; el margen recorta amanecer/ocaso para evitar flapping en los bordes del día, y ante coordenadas inválidas — hay proyectos con lat/lon invertidas — cae al horario fijo), `ctx.in_maintenance(inverter)` (consulta MaintenanceWindow), `ctx.flag_active("inverter_comm_lost", "inv:5")` (¿otra regla ya disparó en este tick? — para exclusiones). Si un request a la API falla, el método devuelve un sentinel `Unavailable(reason)` en vez de explotar: cada regla que dependía de ese dato reporta `not_computable` y las demás siguen.
 
 ### Semántica tri-estado (pregunta 7)
 
@@ -232,14 +232,14 @@ Para implementar exclusiones tipo "no clasificar como falla del inversor si hay 
 | 8 | `meter_comm_lost` | proyecto | `/project/{id}/quoia_measurements_history/` (staleness) vs `/project/{id}/inverter/` (inversores sí reportan) |
 | 9 | `meter_no_increment` | proyecto | `/quoia_measurements_history/` (ΔE≈0/60min), `/generation/` (inversores generando), POA |
 | 10 | `meter_inverter_mismatch` | proyecto | `/generation/` vs `/quoia_measurements_history/` por hora; >3% alerta, >5% alta |
-| 11 | `pr_inputs_missing` | proyecto | Derivada: presencia de energía AC (quoia), POA, P_DC (measurements-dc). SIN T_mod por ahora. |
+| 11 | `pr_inputs_missing` | proyecto | Derivada: presencia de energía AC (quoia), POA, P_DC (measurements-dc) y T_mod (`temperature_POA`) cuando el proyecto tiene estación. |
 | 12 | `availability_inputs_missing` | inversor | Derivada: POA válida + potencia/estado/timestamp de `/project/{id}/inverter/` |
 | 13 | `data_frozen` | proyecto/señal | Ventanas de `/power/` y `/weather/` (3 intervalos idénticos en horario solar; sin temperatura de módulo) |
 | 14 | `weather_comm_lost` | proyecto | `/project/{id}/weather/` (staleness calibrada por proyecto) |
 | 15 | `poa_invalid` | proyecto | `/weather/` (POA<0/inválida/congelada) cruzada con `/power/` (POA=0 con generación) |
-| 16 | `tmod_invalid` | — | **DESHABILITADA** (`enabled=False`): T_mod incierto. Se implementa cuando se defina. |
+| 16 | `tmod_invalid` | proyecto | `/project/{id}/weather/` (`temperature_POA` nula/congelada/fuera de rango/incoherente vs ambiente con POA alta; solo horario solar; sin estación no aplica) |
 | 17 | `recloser_open` | proyecto | `/project/{id}/relay/` (abierto/trip en horario solar), `/relay/historical/`; programado vs disparo vía MaintenanceWindow |
-| 18 | `power_factor_low` | proyecto | `/project/{id}/relay/` (pf<0.95, kw para descartar baja carga) |
+| 18 | `power_factor_low` | proyecto | `/project/{id}/relay/` (pf<0.95, kw para descartar baja carga; unidades normalizadas por `rules/relay_normalize.py`; solo horario solar) |
 | 19 | `thd_abnormal` | — | Stub `enabled=False`: la API no expone THD |
 | 20 | `alarm_sla_breach` | alarma origen | Sin API externa: tabla `Alarm` local (ACTIVE sin ack > sla_ack_minutes) |
 
@@ -260,7 +260,7 @@ Errores de API en `evaluate_project`: sin retry agresivo — el siguiente tick d
 
 ## Cliente SolarView (`integrations/solarview/`)
 
-- `requests.Session` + `Retry(429/502/503/504)`, timeout (5, 30). Base: `{SOLARVIEW_BASE_URL}/monitoring/...`. Auth con `static_token` desde `.env`.
+- `requests.Session` + `Retry(429/502/503/504)`, timeout (5, 30). Base: `https://{SOLARSOLARVIEW_BASE_URL}/monitoring/...` (llave real del `.env`, sin esquema; settings acepta `SOLARVIEW_BASE_URL` como fallback). Auth con `static_token` desde `.env`.
 - Un método público por endpoint que valida el envelope (`success`, `error`) y devuelve dataclasses tipadas — las reglas nunca ven JSON crudo.
 - Excepciones: `SolarViewAPIError`, `SolarViewTimeout`, `SolarViewAuthError` (esta no reintenta).
 - **Sondeo primero (pregunta 10)**: antes de escribir el cliente definitivo, scripts de sondeo contra la API real (token cargado en runtime desde `.env`, nunca impreso ni pegado en el chat) que graban los responses reales como fixtures JSON. Con eso: se confirma formato de timestamps, cadencia real de weather/quoia por proyecto, códigos de `state` del inversor (¿distingue derating/aislamiento?), y estructura exacta de measurements-dc. Los fixtures alimentan los tests.
@@ -273,11 +273,43 @@ Embed con color por severidad, título = nombre de la regla, campos = proyecto/c
 
 DRF instalado, router reservado `/api/v1/`. `Alarm` ya tiene todo lo que un frontend necesita (filtros por índices, timeline, evidence, occurrence_count). Mientras tanto el **Django admin es la UI operativa**: filtros por status/severity/project, actions de ack/resolve, edición de umbrales, canales y schedules.
 
+## Ajustes post-diseño (aprendidos con datos reales, 2026-07-08)
+
+El diseño anterior se validó contra la API y las plantas reales; estos ajustes
+anti-ruido no estaban en el plan original (detalle por tarea en `ROADMAP.md`,
+sección Post-COMPLETADO):
+
+- **T_mod definido** (T22): `temperature_POA` = temperatura del panel. Regla 16
+  `tmod_invalid` implementada y habilitada (migración 0004); la regla 11 exige
+  T_mod cuando el proyecto tiene estación. 19/20 reglas activas (solo THD off).
+- **Gate de horario solar con margen** (T23): los inversores se "duermen" al
+  ocaso y generaron una ola de ~193 falsas alarmas (`inverter_comm_lost`,
+  `pr_inputs_missing`). Las reglas 4 y 12 solo evalúan dentro de
+  `[amanecer+45, ocaso-45]`; la 11 exige ventana horaria completamente diurna
+  (margen 30). Params en migración 0005.
+- **Auto-test de aislamiento no es falla** (T24): el state
+  `"Standby: insulation resistance detecting"` es rutinario → la regla 7 exige
+  calificador (low/fault/abnormal/fail). La regla 6 exige baseline comparable
+  ≥ `comparable_min_current_a` (goteo de 0.1 A al atardecer no es string
+  degradado). De 129 alarmas iniciales quedaron 2 legítimas.
+- **Fallback de horario solar** (T25): la API entrega lat/lon invertidas en al
+  menos un proyecto (astral explota con "Sun never reaches 6 degrees") →
+  `is_solar_hours` cae al horario fijo ante `ValueError`.
+- **Gate nocturno en `power_factor_low`** (T26): el pf fuera de horario solar
+  no es señal accionable.
+- **Normalización heurística del relay** (T27): la API no informa marca/modelo
+  del medidor y `kw` llega en escalas inconsistentes (se sospecha W vs kW).
+  `rules/relay_normalize.py` resuelve la unidad por plausibilidad física
+  contra la capacidad instalada (desempate por potencia de inversores); pf
+  ÷100 si viene en %; ambigüedad irresoluble → `not_computable` (nunca
+  adivinar). `evidence` conserva `kw_raw` + notas de normalización para
+  auditoría.
+
 ## Arquitectura de ejecución con `/loop`
 
 ### Archivo de estado: `ROADMAP.md` en la raíz del repo
 
-Cola de trabajo y memoria persistente entre iteraciones (el repo es la memoria: sobrevive a compactaciones de contexto):
+Cola de trabajo y memoria persistente entre iteraciones (el repo es la memoria: sobrevive a compactaciones de contexto). El bloque de abajo es el snapshot con el que arrancó el loop; el estado real y las notas acumuladas viven en `ROADMAP.md` (hoy: COMPLETADO):
 
 ```markdown
 # ROADMAP — solarview-alarms

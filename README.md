@@ -1,9 +1,10 @@
 # solarview-alarms
 
 Sistema de alarmas para plantas solares SolarView: lee datos de la API de
-monitoreo (vía el alias `/monitoring/`), evalúa las 20 alarmas de Fase 1 cada
-5 minutos con Celery, persiste alarmas deduplicadas en PostgreSQL y notifica a
-Discord con trazabilidad del canal de destino.
+monitoreo (vía el alias `/monitoring/`), evalúa las alarmas de Fase 1 (19 de
+20 activas; solo THD deshabilitada) cada 5 minutos con Celery, persiste
+alarmas deduplicadas en PostgreSQL y notifica a Discord con trazabilidad del
+canal de destino.
 
 ## Arquitectura
 
@@ -29,7 +30,7 @@ Documentación:
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 docker compose up -d          # postgres:16 + redis:7
-cp .env.example .env          # o crear .env con las llaves de abajo
+cp .env.example .env          # y llenar las llaves (ver tabla abajo)
 .venv/bin/python manage.py migrate
 .venv/bin/python manage.py createsuperuser
 ```
@@ -73,6 +74,17 @@ Llaves del `.env` (nunca commitear):
 - Quoia (medidor de frontera) devuelve 500 server-side en todos los proyectos:
   las reglas 8/9/10 viven en `not_computable` (sin ruido) hasta que el backend
   lo arregle. Ver Bloqueadas en `ROADMAP.md`.
-- `state` del inversor solo se ha observado como "Grid-connected": los keywords
-  de derating/aislamiento (reglas 3/7) son tentativos.
-- Reglas 16 (T_mod) y 19 (THD) deshabilitadas por diseño.
+- `state` del inversor: strings legibles con formato `"Modo: detalle"`.
+  Observados "Grid-connected" y "Standby: insulation resistance detecting"
+  (auto-test rutinario, NO falla — la regla 7 exige calificador
+  low/fault/abnormal). El vocabulario de DERATING (regla 3) sigue sin
+  conocerse: keywords tentativos.
+- La API entrega lat/lon invertidas en al menos un proyecto (151, DEPRECATED,
+  excluido con `monitoring_enabled=False`): `is_solar_hours` cae al horario
+  fijo cuando astral explota por coordenadas inválidas.
+- `relay.kw` llega en escalas inconsistentes según el proyecto (se sospecha W
+  en vez de kW): `rules/relay_normalize.py` resuelve la unidad por
+  plausibilidad física contra la capacidad instalada; ambigüedad irresoluble
+  → `not_computable`. Pendiente confirmación del backend.
+- Regla 16 (T_mod = `temperature_POA`) activa desde la migración 0004; solo
+  la 19 (THD) sigue deshabilitada — la API no expone THD.
