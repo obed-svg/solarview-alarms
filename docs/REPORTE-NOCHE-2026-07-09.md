@@ -70,6 +70,17 @@ Punto de partida: `f21ee08` (T35).
   fin definitivo de los locks de sqlite (los `EvaluationRun.create` de otros
   hilos quedaban fuera del write-lock).
 
+- **05:40-05:45 (amanecer)** — 18 alarmas nuevas en 10 min, todas de una
+  familia: reglas de ventana evaluando con `now` solar pero ventana de 45 min
+  aún nocturna. 13 `poa_invalid` (frozen 0.0 = noche real; offset -1.0 del
+  piranómetro; generación difusa cruzando los 5 kW), 1 `data_frozen`
+  (temperatura constante nocturna), 3 `recloser_open` **frescos** (60 Hz en
+  red, corrientes 0) = plantas que abren el reconectador de noche por
+  operación. Fix T39 (`3fdc892`): ventana completamente diurna en 13/15/16
+  (margen 60) y margen 30 en la 17; y las 5 reglas con gate nocturno pasan a
+  `not_computable` (congelar) — un `ok` nocturno habría resuelto en falso
+  cada anochecer las alarmas legítimas del día.
+
 ## Para decidir en la mañana
 
 - **Backend**: agregar al reporte la irradiancia nocturna imposible de p118
