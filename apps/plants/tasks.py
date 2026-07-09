@@ -34,6 +34,7 @@ def sync_catalog() -> dict:
                 "latitude": info.lat,
                 "longitude": info.lon,
                 "is_minifarm": info.is_minifarm,
+                "is_self_consumption": info.is_self_consumption,
                 "raw": info.raw,
                 "synced_at": now,
             },

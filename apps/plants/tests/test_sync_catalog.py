@@ -48,8 +48,21 @@ class TestSyncCatalog:
         project = Project.objects.get(external_id=146)
         assert project.name == "El Son"
         assert float(project.latitude) == 4.7
+        assert project.is_minifarm is True
+        assert project.is_self_consumption is False
         assert project.inverters.get(external_id=1571).dev_name == "300KTL-Inversor1"
         assert stats == {"projects": 1, "inverters": 1, "errors": 0}
+
+    @patch("apps.plants.tasks.SolarViewClient")
+    def test_self_consumption_flag_is_persisted(self, client_cls):
+        # T35: el flag gobierna el skip de las reglas 9/10/18
+        client_cls.from_settings.return_value = fake_client(
+            [project_info(is_self_consumption=True)], {146: []}
+        )
+
+        sync_catalog()
+
+        assert Project.objects.get(external_id=146).is_self_consumption is True
 
     @patch("apps.plants.tasks.SolarViewClient")
     def test_updates_existing_without_duplicating(self, client_cls):

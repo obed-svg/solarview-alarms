@@ -119,6 +119,28 @@ class TestInverterDerating:
 
         assert all(o.status == "ok" for o in InverterDerating().evaluate(ctx))
 
+    def test_temp_threshold_is_80(self, project):
+        # T35: umbral 100 → 80 °C (alarma típica de los SUN2000)
+        inverters = [
+            live(1, "INV-1", power=100.0, temperature=81.0),
+            live(2, "INV-2", power=250.0, temperature=60.0),
+            live(3, "INV-3", power=245.0, temperature=59.0),
+        ]
+        outcomes = {
+            o.dedup_suffix: o
+            for o in InverterDerating().evaluate(make_ctx(project, inverters))
+        }
+        assert outcomes["inv:1"].status == "firing"
+
+        inverters[0] = live(1, "INV-1", power=100.0, temperature=79.0)
+        outcomes = {
+            o.dedup_suffix: o
+            for o in InverterDerating().evaluate(make_ctx(project, inverters))
+        }
+        assert outcomes["inv:1"].status != "firing" or (
+            outcomes["inv:1"].evidence.get("trigger") != "temperature"
+        )
+
 
 @pytest.mark.django_db
 class TestStringZeroCurrent:

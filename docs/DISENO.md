@@ -239,7 +239,7 @@ Para implementar exclusiones tipo "no clasificar como falla del inversor si hay 
 | 15 | `poa_invalid` | proyecto | `/weather/` (POA<0/inválida/congelada) cruzada con `/power/` (POA=0 con generación) |
 | 16 | `tmod_invalid` | proyecto | `/project/{id}/weather/` (`temperature_POA` nula/congelada/fuera de rango/incoherente vs ambiente con POA alta; solo horario solar; sin estación no aplica) |
 | 17 | `recloser_open` | proyecto | `/project/{id}/relay/` (abierto/trip en horario solar), `/relay/historical/`; programado vs disparo vía MaintenanceWindow |
-| 18 | `power_factor_low` | proyecto | `/project/{id}/relay/` (pf<0.95, kw para descartar baja carga; unidades normalizadas por `rules/relay_normalize.py`; solo horario solar) |
+| 18 | `power_factor_low` | proyecto | `/project/{id}/relay/` (pf<0.95; gate de carga por CORRIENTE max(i_a/b/c) ≥ min_load_current_a — `relay.kw` nunca se usa; pf ÷100 si viene en %; pf=0 con carga = diagnóstico de firmware; solo horario solar; no aplica en autoconsumo) |
 | 19 | `thd_abnormal` | — | Stub `enabled=False`: la API no expone THD |
 | 20 | `alarm_sla_breach` | alarma origen | Sin API externa: tabla `Alarm` local (ACTIVE sin ack > sla_ack_minutes) |
 
@@ -316,7 +316,15 @@ sección Post-COMPLETADO):
   encontraron nodos en Manager") cuando NO lo tiene, vs 500 `"-1"` cuando sí.
   `ctx.quoia()` consulta el live una vez (solo si el histórico falla, cacheado
   por tick): sin medidor → `not_associated` → reglas 8/9/10 devuelven `[]`
-  (45 proyectos); con medidor pero sin datos → `not_computable` (6 proyectos).
+  (45 proyectos); con medidor pero sin datos → alarma `meter_comm_lost` con
+  diagnóstico (T34).
+- **Relay sin potencia, con corriente** (T35): `relay.kw` nunca entra en
+  lógica — unidades inconsistentes y relays con firmware viejo que entregan
+  enteros sin sentido (34 A con kw=1, pf=0, tensiones=0). El gate de carga de
+  la regla 18 es por corriente (A); `pf=0` con corriente = diagnóstico de
+  firmware. "Planta activa" = `active` (el backend condensa las tensiones
+  u_a/b/c lado planta y u_r/s/t lado red). Autoconsumo
+  (`is_self_consumption`): reglas 9/10/18 no aplican; derating a 80 °C.
 
 ## Arquitectura de ejecución con `/loop`
 

@@ -87,9 +87,13 @@ Llaves del `.env` (nunca commitear):
 - La API entrega lat/lon invertidas en al menos un proyecto (151, DEPRECATED,
   excluido con `monitoring_enabled=False`): `is_solar_hours` cae al horario
   fijo cuando astral explota por coordenadas inválidas.
-- `relay.kw` llega en escalas inconsistentes según el proyecto (se sospecha W
-  en vez de kW): `rules/relay_normalize.py` resuelve la unidad por
-  plausibilidad física contra la capacidad instalada; ambigüedad irresoluble
-  → `not_computable`. Pendiente confirmación del backend.
+- `relay.kw` **nunca se usa en lógica** (T35, decisión de producto): las
+  unidades varían por equipo y los relays con firmware desactualizado leen la
+  potencia mal (enteros: kw=1 con 34 A fluyendo). El gate de carga de la regla
+  18 es por **corriente** (`min_load_current_a`); `pf=0` con corriente se
+  reporta como diagnóstico de firmware. "Planta activa" = `active` del relay.
+- Autoconsumo (`is_self_consumption`): las reglas 9/10/18 no aplican — hoy
+  0/77 proyectos tienen el flag (37 minigranjas, que operan como exportación
+  normal); los guards quedan listos para cuando se den de alta.
 - Regla 16 (T_mod = `temperature_POA`) activa desde la migración 0004; solo
   la 19 (THD) sigue deshabilitada — la API no expone THD.

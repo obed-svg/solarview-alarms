@@ -126,6 +126,16 @@ class TestMeterNoIncrement:
 
         assert MeterNoIncrement().evaluate(ctx)[0].status == "not_computable"
 
+    def test_self_consumption_does_not_apply(self, db):
+        # T35: en autoconsumo la frontera puede legítimamente no incrementar
+        auto = Project.objects.create(
+            external_id=200, name="Autoconsumo", is_self_consumption=True,
+            synced_at=timezone.now(),
+        )
+        ctx = make_ctx(auto, quoia=quoia_series([0, 0, 0, 0, 0, 0]))
+
+        assert MeterNoIncrement().evaluate(ctx) == []
+
 
 @pytest.mark.django_db
 class TestMeterInverterMismatch:
@@ -161,3 +171,13 @@ class TestMeterInverterMismatch:
         ctx = make_ctx(project, quoia=quoia_series([8.0] * 6), gen=generation([0.0, 0.0]))
 
         assert MeterInverterMismatch().evaluate(ctx)[0].status == "not_computable"
+
+    def test_self_consumption_does_not_apply(self, db):
+        # T35: el mismatch inversores-vs-frontera es estructural en autoconsumo
+        auto = Project.objects.create(
+            external_id=201, name="Autoconsumo", is_self_consumption=True,
+            synced_at=timezone.now(),
+        )
+        ctx = make_ctx(auto, quoia=quoia_series([8.0] * 6), gen=generation([48, 50.0]))
+
+        assert MeterInverterMismatch().evaluate(ctx) == []

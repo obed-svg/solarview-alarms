@@ -16,6 +16,9 @@ class Project(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     timezone = models.CharField(max_length=64, default="America/Bogota")
     is_minifarm = models.BooleanField(default=False)
+    # Autoconsumo: la energía se consume localmente → las reglas de frontera
+    # (9, 10, 18) no aplican (decisión del usuario 2026-07-08, ver T35).
+    is_self_consumption = models.BooleanField(default=False)
     monitoring_enabled = models.BooleanField(default=True)
     raw = models.JSONField(default=dict, blank=True)
     synced_at = models.DateTimeField()

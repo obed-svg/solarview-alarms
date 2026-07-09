@@ -58,12 +58,19 @@ def _inverter_energy_kwh(ctx, window_minutes: int) -> float | None:
 @register
 class MeterNoIncrement(BaseRule):
     """Regla 9: la frontera no registra energía aunque los inversores generan
-    y hay POA. Sin medidor quoia la regla no aplica."""
+    y hay POA. Sin medidor quoia la regla no aplica.
+
+    NO aplica en autoconsumo (decisión del usuario 2026-07-08, T35): la
+    energía se consume localmente, la frontera puede legítimamente no
+    incrementar mientras los inversores generan."""
 
     code = "meter_no_increment"
     phase = 3
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        if ctx.project.is_self_consumption:
+            return []
+
         quoia = ctx.quoia()
         if isinstance(quoia, Unavailable):
             if quoia.reason == "not_associated":
@@ -111,12 +118,19 @@ class MeterNoIncrement(BaseRule):
 @register
 class MeterInverterMismatch(BaseRule):
     """Regla 10: |E_inv - E_frontera| / E_inv en ventana horaria.
-    >5% → high; 3-5% → medium (escala si empeora, el engine no baja severidad)."""
+    >5% → high; 3-5% → medium (escala si empeora, el engine no baja severidad).
+
+    NO aplica en autoconsumo (decisión del usuario 2026-07-08, T35): el
+    mismatch inversores-vs-frontera es estructural cuando la energía se
+    consume localmente."""
 
     code = "meter_inverter_mismatch"
     phase = 3
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        if ctx.project.is_self_consumption:
+            return []
+
         quoia = ctx.quoia()
         if isinstance(quoia, Unavailable):
             if quoia.reason == "not_associated":

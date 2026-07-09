@@ -1,9 +1,22 @@
-"""Fase 3 — red/MT y calidad de energía (reconectador)."""
+"""Fase 3 — red/MT y calidad de energía (reconectador).
+
+Decisiones del usuario (2026-07-08, T35):
+- "Planta activa" = `active` de /project/{id}/relay/ — ÚNICA señal de
+  abierto/cerrado (el backend ya condensa las tensiones u_a/b/c lado planta y
+  u_r/s/t lado red en `active`; nunca re-derivarlo de voltajes).
+- NUNCA usar `relay.kw` en lógica: cada reconectador reporta la potencia en
+  unidades distintas y algunos la leen mal. El gate de carga de la regla 18 es
+  por CORRIENTE (amperios, sin ambigüedad de escala). Sin corrientes →
+  not_computable, sin fallback.
+- Relays con firmware desactualizado entregan lecturas enteras sin sentido
+  (fixture real: i_a/b/c=34 A con kw=1, kva=1, pf=0, tensiones=0) → pf=0 con
+  corriente fluyendo se reporta como diagnóstico de firmware, no como alarma.
+"""
 
 from apps.alarms.context import Unavailable
 
 from .base import BaseRule, RuleOutcome, register
-from .relay_normalize import normalize_relay
+from .relay_normalize import normalize_pf
 
 
 @register
@@ -42,7 +55,7 @@ class RecloserOpen(BaseRule):
                 status="firing",
                 evidence={
                     "active": relay.active,
-                    "kw": relay.kw,
+                    "currents_a": relay.currents,
                     "f_abc": relay.f_abc,
                     "measured_at": str(relay.time),
                 },
@@ -53,12 +66,22 @@ class RecloserOpen(BaseRule):
 @register
 class PowerFactorLow(BaseRule):
     """Regla 18: FP bajo el umbral, solo con carga suficiente (en baja carga
-    el FP no es representativo)."""
+    el FP no es representativo).
+
+    Gate de carga por CORRIENTE (max de i_a/i_b/i_c ≥ min_load_current_a) —
+    nunca por relay.kw (ver docstring del módulo). NO aplica en autoconsumo
+    (el pf de frontera lo domina la carga del cliente, no la planta).
+    pf=0 exacto con corriente fluyendo = firmware desactualizado del
+    reconectador → not_computable con diagnóstico (las lecturas crudas van
+    como evidencia forense, jamás a una decisión)."""
 
     code = "power_factor_low"
     phase = 3
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        if ctx.project.is_self_consumption:
+            return []
+
         relay = ctx.relay()
         if isinstance(relay, Unavailable):
             if relay.reason == "not_associated":
@@ -70,47 +93,58 @@ class PowerFactorLow(BaseRule):
         if not ctx.is_solar_hours():
             return [RuleOutcome(status="ok", reason="excluded:night")]
 
+        # planta abierta: sin flujo no hay pf que evaluar (la 17 alarma la apertura)
+        if relay.active is False:
+            return [RuleOutcome(status="ok", reason="excluded:recloser_open")]
+
         params = ctx.params(self.code)
 
-        # normalización de unidades (cada marca de reconectador reporta distinto):
-        # ancla 1 = capacidad instalada; ancla 2 = potencia de inversores
-        inverter_total = None
-        inverters = ctx.inverters_live()
-        if not isinstance(inverters, Unavailable):
-            inverter_total = sum(inv.power or 0 for inv in inverters)
-        normalized = normalize_relay(
-            relay,
-            capacity_kw=float(ctx.project.installed_capacity_kw or 0) or None,
-            inverter_total_kw=inverter_total,
-        )
+        currents = [
+            relay.currents.get(phase)
+            for phase in ("i_a", "i_b", "i_c")
+            if relay.currents.get(phase) is not None
+        ]
+        if not currents:
+            return [RuleOutcome(status="not_computable", reason="relay:sin_corrientes")]
 
-        if normalized.kw is None:
-            # unidad irresoluble; pero si BAJO CUALQUIER escala candidata la
-            # carga queda bajo el umbral, la decisión es la misma: baja carga
-            from .relay_normalize import KW_SCALES
-
-            if relay.kw is not None and all(
-                relay.kw * s < params["min_load_kw"] for s in KW_SCALES
-            ):
-                return [RuleOutcome(status="ok", reason="excluded:low_load")]
-            return [
-                RuleOutcome(status="not_computable", reason="relay:unidad_kw_ambigua")
-            ]
-        if normalized.kw < params["min_load_kw"]:
+        max_current = max(currents)
+        if max_current < params["min_load_current_a"]:
             return [RuleOutcome(status="ok", reason="excluded:low_load")]
-        if normalized.pf is None:
-            return [RuleOutcome(status="not_computable", reason="relay:pf_ausente")]
 
-        if normalized.pf < params["pf_min"]:
+        pf = normalize_pf(relay.pf)
+        if pf is None:
+            return [RuleOutcome(status="not_computable", reason="relay:pf_ausente")]
+        if pf == 0:
+            # corriente fluyendo con pf=0 exacto: lectura implausible — relays
+            # sin actualización de firmware entregan enteros (kw=1, pf=0,
+            # tensiones=0). Diagnóstico visible para gestionar el firmware.
+            return [
+                RuleOutcome(
+                    status="not_computable",
+                    reason=(
+                        "relay:pf_cero_con_carga (lecturas enteras — probable "
+                        "firmware desactualizado del reconectador)"
+                    ),
+                    evidence={
+                        "currents_a": relay.currents,
+                        "raw_readings": {
+                            "kw": relay.kw, "kva": relay.kva, "pf": relay.pf,
+                            "voltages": relay.voltages,
+                        },
+                        "measured_at": str(relay.time),
+                    },
+                )
+            ]
+
+        if pf < params["pf_min"]:
             return [
                 RuleOutcome(
                     status="firing",
                     evidence={
-                        "pf": normalized.pf,
+                        "pf": pf,
                         "pf_min": params["pf_min"],
-                        "kw": round(normalized.kw, 2),
-                        "kw_raw": relay.kw,
-                        "normalization": normalized.notes,
+                        "currents_a": relay.currents,
+                        "min_load_current_a": params["min_load_current_a"],
                         "measured_at": str(relay.time),
                     },
                 )

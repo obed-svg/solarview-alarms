@@ -59,7 +59,7 @@ CATALOG = [
         "component_type": "inverter",
         "default_severity": "high",
         "rule_group": "fast",
-        "default_params": {"temp_max_c": 100, "comparable_low_ratio": 0.8},
+        "default_params": {"temp_max_c": 80, "comparable_low_ratio": 0.8},
     },
     {
         "code": "inverter_comm_lost",
@@ -266,7 +266,7 @@ CATALOG = [
         "component_type": "relay",
         "default_severity": "medium",
         "rule_group": "fast",
-        "default_params": {"pf_min": 0.95, "min_load_kw": 10},
+        "default_params": {"pf_min": 0.95, "min_load_current_a": 5},
     },
     {
         "code": "thd_abnormal",

@@ -15,10 +15,11 @@ NOON = datetime(2026, 7, 8, 12, 0)
 NIGHT = datetime(2026, 7, 8, 2, 0)
 
 
-def relay(active=True, pf=0.98, kw=240.0):
+def relay(active=True, pf=0.98, currents=None, kw=240.0, voltages=None):
     return RelayStatus(
         time=NOON, active=active, kw=kw, kva=250.0, pf=pf, f_abc=60.0,
-        currents={}, voltages={},
+        currents={"i_a": 30.0, "i_b": 30.0, "i_c": 30.0} if currents is None else currents,
+        voltages=voltages or {},
     )
 
 
@@ -30,20 +31,13 @@ def project(db):
     )
 
 
-def make_ctx(project, relay_value, now=NOON, inverter_kw=None):
+def make_ctx(project, relay_value, now=NOON):
     client = MagicMock()
     if isinstance(relay_value, Exception):
         client.relay_now.side_effect = relay_value
     else:
         client.relay_now.return_value = relay_value
-    inverters = []
-    if inverter_kw is not None:
-        from integrations.solarview.schemas import InverterLive
-
-        inverters = [InverterLive(id=1, dev_name="INV-1", state="Grid-connected",
-                                  power=inverter_kw, efficiency=98.0,
-                                  temperature=60.0, time=now)]
-    client.project_inverters.return_value = inverters
+    client.project_inverters.return_value = []
     return EvaluationContext(project=project, client=client, now=now)
 
 
@@ -53,6 +47,7 @@ class TestRecloserOpen:
         outcomes = RecloserOpen().evaluate(make_ctx(project, relay(active=False)))
 
         assert outcomes[0].status == "firing"
+        assert "currents_a" in outcomes[0].evidence
 
     def test_closed_is_ok(self, project):
         assert RecloserOpen().evaluate(make_ctx(project, relay(active=True)))[0].status == "ok"
@@ -96,50 +91,80 @@ class TestRecloserOpen:
 
 @pytest.mark.django_db
 class TestPowerFactorLow:
+    """T35: gate de carga por CORRIENTE — relay.kw nunca participa en lógica."""
+
     def test_low_pf_under_load_fires(self, project):
-        # inversores generando ~210 kW desempatan la escala del kw del relay
-        outcomes = PowerFactorLow().evaluate(
-            make_ctx(project, relay(pf=0.82, kw=200.0), inverter_kw=210.0)
-        )
+        outcomes = PowerFactorLow().evaluate(make_ctx(project, relay(pf=0.82)))
 
         assert outcomes[0].status == "firing"
         assert outcomes[0].evidence["pf"] == 0.82
+        assert outcomes[0].evidence["currents_a"]["i_a"] == 30.0
 
-    def test_watts_scale_relay_excluded_as_low_load(self, project):
-        # caso real: kw=5832.96 (W) en planta de 1 MW → 5.8 kW → baja carga
+    def test_low_current_excluded_as_low_load(self, project):
+        # corrientes ≈ 0: baja carga, el FP no es representativo
         outcomes = PowerFactorLow().evaluate(
-            make_ctx(project, relay(pf=0.318, kw=5832.96), inverter_kw=0.0)
+            make_ctx(project, relay(pf=0.2, currents={"i_a": 0.0, "i_b": 1.0, "i_c": 0.5}))
         )
 
         assert outcomes[0].status == "ok"
         assert outcomes[0].reason == "excluded:low_load"
 
-    def test_low_pf_at_low_load_is_ok(self, project):
-        # con poca carga el FP no es representativo (validación del Excel)
-        outcomes = PowerFactorLow().evaluate(make_ctx(project, relay(pf=0.2, kw=3.0)))
+    def test_missing_currents_not_computable(self, project):
+        # algunos relays no reportan corriente (error del equipo): no se puede
+        # calcular y ya — NUNCA caer al kw del relay
+        outcomes = PowerFactorLow().evaluate(
+            make_ctx(project, relay(pf=0.5, currents={}, kw=200.0))
+        )
+
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "relay:sin_corrientes"
+
+    def test_all_null_currents_not_computable(self, project):
+        outcomes = PowerFactorLow().evaluate(
+            make_ctx(project, relay(pf=0.5, currents={"i_a": None, "i_b": None, "i_c": None}))
+        )
+
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "relay:sin_corrientes"
+
+    def test_pf_zero_with_load_is_firmware_diagnosis(self, project):
+        # caso del fixture real: 34 A por fase con kw=1, pf=0, tensiones=0
+        # (firmware desactualizado entrega enteros) → diagnóstico, no alarma
+        outcomes = PowerFactorLow().evaluate(
+            make_ctx(project, relay(
+                pf=0, kw=1.0,
+                currents={"i_a": 34.0, "i_b": 34.0, "i_c": 34.0},
+                voltages={"u_a": 0, "u_b": 0, "u_c": 0},
+            ))
+        )
+
+        assert outcomes[0].status == "not_computable"
+        assert "firmware" in outcomes[0].reason
+        assert outcomes[0].evidence["raw_readings"]["kw"] == 1.0
+
+    def test_open_relay_excluded(self, project):
+        # planta abierta: la 17 alarma la apertura; sin flujo no hay pf
+        outcomes = PowerFactorLow().evaluate(make_ctx(project, relay(active=False, pf=0.2)))
 
         assert outcomes[0].status == "ok"
-        assert outcomes[0].reason == "excluded:low_load"
+        assert outcomes[0].reason == "excluded:recloser_open"
+
+    def test_pf_in_percent_is_normalized(self, project):
+        # firmware que entrega pf en % (95) → 0.95 → sano
+        outcomes = PowerFactorLow().evaluate(make_ctx(project, relay(pf=95)))
+
+        assert outcomes[0].status == "ok"
 
     def test_healthy_pf_is_ok(self, project):
         assert PowerFactorLow().evaluate(
-            make_ctx(project, relay(pf=0.98, kw=200.0), inverter_kw=210.0)
+            make_ctx(project, relay(pf=0.98))
         )[0].status == "ok"
 
     def test_missing_pf_not_computable(self, project):
-        outcomes = PowerFactorLow().evaluate(
-            make_ctx(project, relay(pf=None, kw=200.0), inverter_kw=210.0)
-        )
+        outcomes = PowerFactorLow().evaluate(make_ctx(project, relay(pf=None)))
 
         assert outcomes[0].status == "not_computable"
-
-    def test_ambiguous_kw_unit_not_computable(self, project):
-        # 200 puede ser kW o W (0.2 kW) y no hay inversores para desempatar:
-        # cruza el umbral en una escala y no en la otra → no adivinar
-        outcomes = PowerFactorLow().evaluate(make_ctx(project, relay(pf=0.5, kw=200.0)))
-
-        assert outcomes[0].status == "not_computable"
-        assert "ambigua" in outcomes[0].reason
+        assert outcomes[0].reason == "relay:pf_ausente"
 
     def test_no_relay_does_not_apply(self, project):
         assert PowerFactorLow().evaluate(
@@ -149,11 +174,20 @@ class TestPowerFactorLow:
     def test_night_is_excluded(self, project):
         # visto en producción: FP 0.318 a las 18:40 = consumo auxiliar nocturno
         outcomes = PowerFactorLow().evaluate(
-            make_ctx(project, relay(pf=0.318, kw=5832.96), now=NIGHT)
+            make_ctx(project, relay(pf=0.318), now=NIGHT)
         )
 
         assert outcomes[0].status == "ok"
         assert outcomes[0].reason == "excluded:night"
+
+    def test_self_consumption_does_not_apply(self, db):
+        # autoconsumo: el pf de frontera lo domina la carga del cliente
+        auto = Project.objects.create(
+            external_id=200, name="Autoconsumo", is_self_consumption=True,
+            synced_at=timezone.now(),
+        )
+
+        assert PowerFactorLow().evaluate(make_ctx(auto, relay(pf=0.5))) == []
 
 
 @pytest.mark.django_db
