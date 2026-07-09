@@ -107,9 +107,12 @@ class InverterCommLost(BaseRule):
         # sostenida (mismo gate físico que la regla 2). POA no verificable al
         # alba (weather aún dormido) → not_computable, sin falsas.
         # .get con defaults: DBs sin la migración 0010 no deben explotar.
+        # wake_grace (T41): entre que la POA cruza el umbral y el datalogger
+        # reporta el primer dato del día pasan ~25 min observados → exigir POA
+        # sostenida 45 min antes de exigir comunicación.
         poa_ok = poa_sustained_above(ctx, {
             "poa_min_wm2": params.get("poa_min_wm2", 100),
-            "persistence_minutes": params.get("persistence_minutes", 15),
+            "persistence_minutes": params.get("wake_grace_minutes", 45),
             "data_lag_minutes": params.get("data_lag_minutes", 5),
         })
         if poa_ok is None:

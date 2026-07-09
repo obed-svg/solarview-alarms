@@ -72,6 +72,7 @@ CATALOG = [
         "default_params": {
             "poa_min_wm2": 100,
             "persistence_minutes": 15,
+            "wake_grace_minutes": 45,
             "stale_minutes": 15,
             "expected_cadence_minutes": 5,
             "data_lag_minutes": 5,
@@ -145,6 +146,7 @@ CATALOG = [
             "poa_min_wm2": 100,
             "window_minutes": 60,
             "delta_zero_kwh": 0.1,
+            "min_window_energy_kwh": 10,
         },
     },
     {
@@ -158,7 +160,10 @@ CATALOG = [
         "component_type": "meter",
         "default_severity": "high",
         "rule_group": "hourly",
-        "default_params": {"window_minutes": 60, "alert_ratio": 0.03, "high_ratio": 0.05},
+        "default_params": {
+            "window_minutes": 60, "alert_ratio": 0.03, "high_ratio": 0.05,
+            "min_window_energy_kwh": 10,
+        },
     },
     {
         "code": "pr_inputs_missing",

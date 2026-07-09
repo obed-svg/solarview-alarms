@@ -98,9 +98,12 @@ class MeterNoIncrement(BaseRule):
                 RuleOutcome(status="not_computable", reason="generation:no_disponible")
             ]
 
+        # piso de energía (T41): al alba la generación de la ventana es <1 kWh
+        # y cualquier diferencia dispara falsos — exigir energía significativa
+        min_energy = params.get("min_window_energy_kwh", 10)
         if (
             frontier_energy <= params["delta_zero_kwh"]
-            and inverter_energy > params["delta_zero_kwh"]
+            and inverter_energy >= min_energy
         ):
             return [
                 RuleOutcome(
@@ -148,6 +151,16 @@ class MeterInverterMismatch(BaseRule):
         if not inverter_energy:  # None o 0: sin denominador no hay ratio
             return [
                 RuleOutcome(status="not_computable", reason="generation:sin_energia_inv")
+            ]
+        # piso de energía (T41, visto al alba real: 0.19-0.94 kWh en ventana →
+        # ratios de 75-100% con diferencias de centésimas de kWh, sin sentido)
+        min_energy = params.get("min_window_energy_kwh", 10)
+        if inverter_energy < min_energy:
+            return [
+                RuleOutcome(
+                    status="not_computable",
+                    reason=f"energia_ventana_insuficiente (<{min_energy} kWh)",
+                )
             ]
 
         ratio = abs(inverter_energy - frontier) / inverter_energy

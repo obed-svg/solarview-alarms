@@ -361,9 +361,10 @@ class AvailabilityInputsMissing(BaseRule):
         # T40: mismo gate físico por POA que la regla 4 — los inversores
         # arrancan por irradiancia, no por reloj (ola matinal de 88 falsas).
         # .get con defaults: DBs sin la migración 0010 no deben explotar.
+        # wake_grace (T41): mismo margen de arranque que la regla 4.
         poa_ok = poa_sustained_above(ctx, {
             "poa_min_wm2": params_comm.get("poa_min_wm2", 100),
-            "persistence_minutes": params_comm.get("persistence_minutes", 15),
+            "persistence_minutes": params_comm.get("wake_grace_minutes", 45),
             "data_lag_minutes": params_comm.get("data_lag_minutes", 5),
         })
         if poa_ok is None:
