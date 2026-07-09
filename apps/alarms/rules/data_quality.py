@@ -359,8 +359,13 @@ class AvailabilityInputsMissing(BaseRule):
             return []
 
         # T40: mismo gate físico por POA que la regla 4 — los inversores
-        # arrancan por irradiancia, no por reloj (ola matinal de 88 falsas)
-        poa_ok = poa_sustained_above(ctx, params_comm)
+        # arrancan por irradiancia, no por reloj (ola matinal de 88 falsas).
+        # .get con defaults: DBs sin la migración 0010 no deben explotar.
+        poa_ok = poa_sustained_above(ctx, {
+            "poa_min_wm2": params_comm.get("poa_min_wm2", 100),
+            "persistence_minutes": params_comm.get("persistence_minutes", 15),
+            "data_lag_minutes": params_comm.get("data_lag_minutes", 5),
+        })
         if poa_ok is None:
             return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
         if not poa_ok:

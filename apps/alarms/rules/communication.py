@@ -106,7 +106,12 @@ class InverterCommLost(BaseRule):
         # legítimamente apagados. Solo se les exige comunicar cuando hay POA
         # sostenida (mismo gate físico que la regla 2). POA no verificable al
         # alba (weather aún dormido) → not_computable, sin falsas.
-        poa_ok = poa_sustained_above(ctx, params)
+        # .get con defaults: DBs sin la migración 0010 no deben explotar.
+        poa_ok = poa_sustained_above(ctx, {
+            "poa_min_wm2": params.get("poa_min_wm2", 100),
+            "persistence_minutes": params.get("persistence_minutes", 15),
+            "data_lag_minutes": params.get("data_lag_minutes", 5),
+        })
         if poa_ok is None:
             return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
         if not poa_ok:
