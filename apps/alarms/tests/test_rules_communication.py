@@ -35,7 +35,7 @@ def project(db):
     return Project.objects.create(external_id=146, name="El Son", synced_at=timezone.now())
 
 
-def make_ctx(project, inverters=None, quoia=None, poa=None):
+def make_ctx(project, inverters=None, quoia=None, poa=None, dc=None):
     client = MagicMock()
     if isinstance(inverters, Exception):
         client.project_inverters.side_effect = inverters
@@ -45,6 +45,10 @@ def make_ctx(project, inverters=None, quoia=None, poa=None):
         client.quoia_history.side_effect = quoia
     else:
         client.quoia_history.return_value = quoia or {}
+    if isinstance(dc, Exception):
+        client.measurements_dc.side_effect = dc
+    else:
+        client.measurements_dc.return_value = dc or {}
     # T40: la regla 4 exige POA sostenida (los inversores arrancan por
     # irradiancia); default = mediodía despejado vía power.irradiance
     client.project_weather.side_effect = SolarViewNotAssociated("no estación")
@@ -74,14 +78,49 @@ class TestInverterCommLost:
         assert outcomes["inv:1571"].inverter_external_id == 1571
         assert outcomes["inv:1575"].status == "ok"
 
-    def test_silent_inverter_fires(self, project):
-        # silencio real: ni time NI power (T42)
-        ctx = make_ctx(project, [live(1571, None, power=None)])
+    def test_silent_inverter_with_dead_dc_fires(self, project):
+        # T47: silencio confirmado por DOS fuentes — live vacío y DC viejo
+        # (caso real p144: DC muerto desde las 10:15)
+        old_dc = {"INV-1571": {"cs1": {NOW - timedelta(hours=6): 8.1}}}
+        ctx = make_ctx(project, [live(1571, None, power=None)], dc=old_dc)
 
         outcomes = InverterCommLost().evaluate(ctx)
 
         assert outcomes[0].status == "firing"
         assert outcomes[0].evidence["last_data_at"] is None
+        assert outcomes[0].evidence["dc_age_minutes"] == 360
+        assert outcomes[0].evidence["second_opinion"] == "measurements-dc"
+
+    def test_silent_inverter_without_dc_trace_fires(self, project):
+        # caso real p150: ni live ni rastro en DC → planta muda de verdad
+        ctx = make_ctx(project, [live(1571, None, power=None)], dc={})
+
+        outcomes = InverterCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "firing"
+        assert outcomes[0].evidence["dc_age_minutes"] is None
+
+    def test_empty_live_with_fresh_dc_is_ok(self, project):
+        # T47 (caso real p111/p117): el live se vacía por ratos pero el
+        # inversor reporta a DC cada 5 min exactos → vivo, sin flap
+        fresh_dc = {"INV-1571": {"cs1": {NOW - timedelta(minutes=5): 7.9}}}
+        ctx = make_ctx(project, [live(1571, None, power=None)], dc=fresh_dc)
+
+        outcomes = InverterCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
+        assert "dc_vivo" in outcomes[0].reason
+
+    def test_empty_live_with_dc_unavailable_is_not_computable(self, project):
+        # ambas fuentes inverificables: no se puede afirmar nada
+        from integrations.solarview.exceptions import SolarViewTimeout as SVT
+
+        ctx = make_ctx(project, [live(1571, None, power=None)], dc=SVT("lento"))
+
+        outcomes = InverterCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "live_vacio_y_dc_no_verificable"
 
     def test_missing_time_with_power_is_ok(self, project):
         # T42 (flap real: 143 aperturas/resoluciones en una mañana): el live

@@ -11,6 +11,20 @@ from .base import BaseRule, RuleOutcome, register
 from .helpers import poa_sustained_above
 
 
+def _dc_age_minutes(ctx, dev_name: str) -> float | None:
+    """Edad (min) del último punto de measurements-dc del inversor — la
+    segunda opinión de la regla 4 (T47). None = endpoint DC no verificable;
+    inf = sin rastro del inversor en la serie DC."""
+    dc = ctx.string_currents()
+    if isinstance(dc, Unavailable):
+        return None
+    series_map = dc.get(dev_name) or {}
+    last = max((ts for series in series_map.values() for ts in series), default=None)
+    if last is None:
+        return float("inf")
+    return (ctx.now - last).total_seconds() / 60
+
+
 @register
 class WeatherCommLost(BaseRule):
     """Regla 14: estación meteorológica sin comunicación.
@@ -155,18 +169,54 @@ class InverterCommLost(BaseRule):
                     )
                 )
                 continue
+
+            # T47: live vacío total (ni time ni power) — el endpoint live se
+            # "vacía" por ratos en algunas plantas mientras el inversor sigue
+            # reportando (medido: DC con cadencia 5 min exactos y el live en
+            # None). Segunda opinión con measurements-dc antes de abrir:
+            # DC fresco → vivo; DC viejo/ausente → silencio confirmado por
+            # dos fuentes independientes (caídas reales: p144 muerto desde
+            # las 10:15, p150 mudo el día entero — esas siguen alarmando).
+            dc_age = None
+            if age_minutes is None:
+                dc_age = _dc_age_minutes(ctx, inv.dev_name)
+                if dc_age is None:
+                    outcomes.append(
+                        RuleOutcome(
+                            status="not_computable", dedup_suffix=suffix,
+                            inverter_external_id=inv.id,
+                            reason="live_vacio_y_dc_no_verificable",
+                        )
+                    )
+                    continue
+                if dc_age <= threshold:
+                    outcomes.append(
+                        RuleOutcome(
+                            status="ok", dedup_suffix=suffix,
+                            inverter_external_id=inv.id,
+                            reason="live_vacio_pero_dc_vivo (T47)",
+                        )
+                    )
+                    continue
+
             if age_minutes is None or age_minutes > threshold:
+                evidence = {
+                    "dev_name": inv.dev_name,
+                    "last_data_at": str(inv.time) if inv.time else None,
+                    "age_minutes": None if age_minutes is None else round(age_minutes),
+                    "threshold_minutes": threshold,
+                }
+                if dc_age is not None:
+                    evidence["dc_age_minutes"] = (
+                        None if dc_age == float("inf") else round(dc_age)
+                    )
+                    evidence["second_opinion"] = "measurements-dc"
                 outcomes.append(
                     RuleOutcome(
                         status="firing",
                         dedup_suffix=suffix,
                         inverter_external_id=inv.id,
-                        evidence={
-                            "dev_name": inv.dev_name,
-                            "last_data_at": str(inv.time) if inv.time else None,
-                            "age_minutes": None if age_minutes is None else round(age_minutes),
-                            "threshold_minutes": threshold,
-                        },
+                        evidence=evidence,
                     )
                 )
             else:
