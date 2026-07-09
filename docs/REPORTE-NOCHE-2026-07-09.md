@@ -38,6 +38,14 @@ Punto de partida: `f21ee08` (T35).
    Fix: cordura física en la regla 1 — fuera del horario solar local no se
    espera generación → `excluded:night`. Auto-resuelta al tick siguiente.
 
+- **00:16-00:25** — Únicas excepciones de la noche: `database is locked` en
+  los refrescos de alarmas de medidor durante los ticks hourly (3 en total).
+  **Artefacto del runner** (sqlite scratch + 8 hilos escritores;
+  `BUSY_SNAPSHOT` en transacciones read→write concurrentes), **no del código
+  de producción** (prod = postgres). Fix en dos pasos: WAL + busy_timeout, y
+  al persistir, lock de escritura en el runner (las escrituras de alarmas se
+  serializan; el fetch de API sigue paralelo). Runner reiniciado 00:26.
+
 ## Para decidir en la mañana
 
 - **Backend**: agregar al reporte la irradiancia nocturna imposible de p118
