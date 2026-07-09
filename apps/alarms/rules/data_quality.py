@@ -62,7 +62,7 @@ class PoaInvalid(BaseRule):
         ):
             return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
-        poa = ctx.poa_series()
+        poa, poa_source = ctx.poa_with_source()
         if isinstance(poa, Unavailable):
             return [RuleOutcome(status="not_computable", reason=f"poa:{poa.reason}")]
 
@@ -76,7 +76,8 @@ class PoaInvalid(BaseRule):
         if min(values) < 0:
             return [
                 RuleOutcome(status="firing",
-                            evidence={"issue": "negative", "min_poa": min(values)})
+                            evidence={"issue": "negative", "min_poa": min(values),
+                                      "poa_source": poa_source})
             ]
 
         power = ctx.power()
@@ -96,11 +97,17 @@ class PoaInvalid(BaseRule):
                         evidence={
                             "issue": "zero_with_generation",
                             "power_max_kw": max(power_values),
+                            "poa_source": poa_source,
                         },
                     )
                 ]
 
-        if _is_frozen(values):
+        # frozen-check SOLO para fuentes de sensor (T46, llave `spire` de
+        # /power/ señalada por el usuario): el modelo satelital regional se
+        # actualiza ~cada hora y comparte valores entre proyectos vecinos
+        # (visto: 3 techos congelados en exactamente 606.0) — congelado es su
+        # cadencia normal. Un sensor físico congelado 45 min SÍ es falla.
+        if poa_source != "power_spire" and _is_frozen(values):
             return [
                 RuleOutcome(
                     status="firing",
@@ -109,6 +116,7 @@ class PoaInvalid(BaseRule):
                         "value": values[0],
                         "window_minutes": window_minutes,
                         "points": len(values),
+                        "poa_source": poa_source,
                     },
                 )
             ]

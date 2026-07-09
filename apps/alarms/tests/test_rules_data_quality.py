@@ -67,8 +67,9 @@ def weather_of(poa_series, temp_series=None, tmod_series=None):
     )
 
 
-def power_of(power_series, irr_series=None):
-    return PowerSeries(unit="kW", power=power_series, irradiance=irr_series or {})
+def power_of(power_series, irr_series=None, spire=False):
+    return PowerSeries(unit="kW", power=power_series, irradiance=irr_series or {},
+                       spire=spire)
 
 
 @pytest.mark.django_db
@@ -98,6 +99,7 @@ class TestPoaInvalid:
         assert outcomes[0].evidence["issue"] == "zero_with_generation"
 
     def test_frozen_poa_in_solar_hours_fires(self, project):
+        # sensor FÍSICO de estación congelado 45 min = falla real
         ctx = make_ctx(project, weather=weather_of(series(60, flat(731.5))),
                        power=power_of(series(60, flat(400), step=5)))
 
@@ -105,6 +107,31 @@ class TestPoaInvalid:
 
         assert outcomes[0].status == "firing"
         assert outcomes[0].evidence["issue"] == "frozen"
+        assert outcomes[0].evidence["poa_source"] == "station"
+
+    def test_frozen_spire_model_is_ok(self, project):
+        # T46 (llave `spire` de /power/, señalada por el usuario): el modelo
+        # satelital regional se actualiza ~cada hora y comparte valores entre
+        # vecinos (3 techos en exactamente 606.0) — congelado es su cadencia
+        # normal, no una falla. 43 falsas de esta familia en producción.
+        ctx = make_ctx(project, weather=SolarViewNotAssociated("no estación"),
+                       power=power_of(series(60, flat(400), step=5),
+                                      irr_series=series(45, flat(606.0)),
+                                      spire=True))
+
+        assert PoaInvalid().evaluate(ctx)[0].status == "ok"
+
+    def test_frozen_power_sensor_still_fires(self, project):
+        # spire=false en /power/ = sensor local vía datalogger → frozen SÍ es falla
+        ctx = make_ctx(project, weather=SolarViewNotAssociated("no estación"),
+                       power=power_of(series(60, flat(400), step=5),
+                                      irr_series=series(45, flat(512.0)),
+                                      spire=False))
+
+        outcomes = PoaInvalid().evaluate(ctx)
+
+        assert outcomes[0].status == "firing"
+        assert outcomes[0].evidence["poa_source"] == "power_sensor"
 
     def test_frozen_at_night_freezes(self, project):
         # T39: POA congelada en 0.0 de noche es lo normal; not_computable

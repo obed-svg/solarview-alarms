@@ -145,13 +145,22 @@ class EvaluationContext:
     def poa_series(self) -> TimeSeries | Unavailable:
         """POA del proyecto: irradiation_POA de la estación meteo si existe;
         si el proyecto no tiene estación, la irradiance del endpoint de power."""
+        return self.poa_with_source()[0]
+
+    def poa_with_source(self) -> tuple[TimeSeries | Unavailable, str]:
+        """(serie POA, fuente). Fuentes: "station" (sensor físico de la
+        estación), "power_sensor" (irradiance de /power/ con spire=false =
+        sensor local), "power_spire" (spire=true = modelo satelital regional
+        Spire — llave señalada por el usuario, T46: se actualiza ~cada hora y
+        comparte valores entre proyectos vecinos → congelamiento es su
+        cadencia normal, no una falla)."""
         weather = self.weather()
         if not isinstance(weather, Unavailable) and weather.irradiation_poa:
-            return weather.irradiation_poa
+            return weather.irradiation_poa, "station"
         power = self.power()
         if isinstance(power, Unavailable):
-            return power
-        return power.irradiance
+            return power, "unavailable"
+        return power.irradiance, ("power_spire" if power.spire else "power_sensor")
 
     # --- Ventanas con tolerancia a lag ---
 
