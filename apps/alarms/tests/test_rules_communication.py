@@ -22,9 +22,9 @@ def poa_series(value=850.0):
     return {NOW - timedelta(minutes=m): value for m in range(0, 25)}
 
 
-def live(iid, minutes_ago, dev_name=None) -> InverterLive:
+def live(iid, minutes_ago, dev_name=None, power=100.0) -> InverterLive:
     return InverterLive(
-        id=iid, dev_name=dev_name or f"INV-{iid}", state="Grid-connected", power=100.0,
+        id=iid, dev_name=dev_name or f"INV-{iid}", state="Grid-connected", power=power,
         efficiency=98.0, temperature=60.0,
         time=None if minutes_ago is None else NOW - timedelta(minutes=minutes_ago),
     )
@@ -74,13 +74,25 @@ class TestInverterCommLost:
         assert outcomes["inv:1571"].inverter_external_id == 1571
         assert outcomes["inv:1575"].status == "ok"
 
-    def test_inverter_without_timestamp_fires(self, project):
-        ctx = make_ctx(project, [live(1571, None)])
+    def test_silent_inverter_fires(self, project):
+        # silencio real: ni time NI power (T42)
+        ctx = make_ctx(project, [live(1571, None, power=None)])
 
         outcomes = InverterCommLost().evaluate(ctx)
 
         assert outcomes[0].status == "firing"
         assert outcomes[0].evidence["last_data_at"] is None
+
+    def test_missing_time_with_power_is_ok(self, project):
+        # T42 (flap real: 143 aperturas/resoluciones en una mañana): el live
+        # de algunas plantas pierde `time` entre lotes aunque power llega —
+        # power presente = comunica
+        ctx = make_ctx(project, [live(1571, None, power=87.5)])
+
+        outcomes = InverterCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
+        assert "lote incompleto" in outcomes[0].reason
 
     def test_maintenance_excludes_that_inverter(self, project):
         inv_model = Inverter.objects.create(

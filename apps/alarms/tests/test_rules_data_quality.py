@@ -230,11 +230,11 @@ class TestPrInputsMissing:
 
 @pytest.mark.django_db
 class TestAvailabilityInputsMissing:
-    def inverters(self, time_ok=True, with_state=True):
+    def inverters(self, time_ok=True, with_state=True, with_power=True):
         return [
             InverterLive(
                 id=1571, dev_name="INV-1", state="Grid-connected" if with_state else None,
-                power=100.0, efficiency=98.0, temperature=60.0,
+                power=100.0 if with_power else None, efficiency=98.0, temperature=60.0,
                 time=NOW - timedelta(minutes=3) if time_ok else None,
             )
         ]
@@ -247,19 +247,34 @@ class TestAvailabilityInputsMissing:
 
         assert outcomes[0].status == "ok"
 
-    def test_inverter_without_timestamp_fires_and_marks(self, project):
+    def test_silent_inverter_fires_and_marks(self, project):
+        # silencio real (T42): ni time ni power
         Inverter.objects.create(project=project, external_id=1571, dev_name="INV-1",
                                 synced_at=timezone.now())
-        ctx = make_ctx(project, inverters=self.inverters(time_ok=False),
+        ctx = make_ctx(project,
+                       inverters=self.inverters(time_ok=False, with_power=False),
                        weather=weather_of(series(30, varying(700))))
 
         outcomes = AvailabilityInputsMissing().evaluate(ctx)
 
         assert outcomes[0].status == "firing"
         assert outcomes[0].dedup_suffix == "inv:1571"
+        assert "timestamp" in outcomes[0].evidence["missing_inputs"]
         interval = NonComputableInterval.objects.get()
         assert interval.metric == "availability"
         assert interval.inverter.external_id == 1571
+
+    def test_missing_time_or_state_with_power_is_ok(self, project):
+        # T42: time/state ausentes con power presente = lote incompleto del
+        # live, el inversor comunica (flap de 122 en una mañana; el censo
+        # demostró state=None frecuentísimo comunicando)
+        ctx = make_ctx(project,
+                       inverters=self.inverters(time_ok=False, with_state=False),
+                       weather=weather_of(series(30, varying(700))))
+
+        outcomes = AvailabilityInputsMissing().evaluate(ctx)
+
+        assert outcomes[0].status == "ok"
 
     def test_missing_poa_is_not_computable(self, project):
         # T40: sin POA verificable no se puede saber si los inversores deben

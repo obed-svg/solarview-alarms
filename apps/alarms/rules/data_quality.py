@@ -387,12 +387,19 @@ class AvailabilityInputsMissing(BaseRule):
             missing = []
             if poa_missing:
                 missing.append("poa")
-            if inv.time is None or (ctx.now - inv.time) > timedelta(minutes=stale_threshold):
+            # T42: timestamp solo cuenta como faltante si power TAMBIÉN falta —
+            # el live de algunas plantas pierde `time` entre lotes aunque el
+            # dato llegue (flap de 122 aperturas/resoluciones en una mañana).
+            # Y `state` sale de los insumos críticos: el censo demostró
+            # state=None frecuentísimo con el inversor comunicando (la
+            # disponibilidad se calcula con power+timestamp).
+            timestamp_stale = inv.time is None or (
+                (ctx.now - inv.time) > timedelta(minutes=stale_threshold)
+            )
+            if timestamp_stale and inv.power is None:
                 missing.append("timestamp")
             if inv.power is None:
                 missing.append("power")
-            if not inv.state:
-                missing.append("state")
 
             suffix = f"inv:{inv.id}"
             if missing:

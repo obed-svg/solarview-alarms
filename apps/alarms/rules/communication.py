@@ -141,6 +141,20 @@ class InverterCommLost(BaseRule):
                 None if inv.time is None
                 else (ctx.now - inv.time).total_seconds() / 60
             )
+            # T42: en la familia de plantas de "lote perezoso" el live pierde
+            # `time` entre lotes aunque `power` sí llega (flap real: 143
+            # aperturas/resoluciones en una mañana → flood en Discord). Power
+            # presente = el inversor comunica; solo time Y power ausentes es
+            # silencio de verdad.
+            if age_minutes is None and inv.power is not None:
+                outcomes.append(
+                    RuleOutcome(
+                        status="ok", dedup_suffix=suffix,
+                        inverter_external_id=inv.id,
+                        reason="time_ausente_con_power (lote incompleto del live)",
+                    )
+                )
+                continue
             if age_minutes is None or age_minutes > threshold:
                 outcomes.append(
                     RuleOutcome(
