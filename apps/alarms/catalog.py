@@ -195,7 +195,7 @@ CATALOG = [
         "component_type": "project",
         "default_severity": "medium",
         "rule_group": "fast",
-        "default_params": {"frozen_intervals": 3},
+        "default_params": {"frozen_intervals": 3, "solar_margin_minutes": 60},
     },
     {
         "code": "weather_comm_lost",
@@ -223,7 +223,7 @@ CATALOG = [
         "component_type": "weather_station",
         "default_severity": "high",
         "rule_group": "fast",
-        "default_params": {"frozen_intervals": 3},
+        "default_params": {"frozen_intervals": 3, "solar_margin_minutes": 60},
     },
     {
         "code": "tmod_invalid",
@@ -242,6 +242,7 @@ CATALOG = [
             "tmod_max_c": 90,
             "coherence_margin_c": 5,
             "poa_for_coherence_wm2": 300,
+            "solar_margin_minutes": 60,
         },
     },
     {
@@ -255,7 +256,7 @@ CATALOG = [
         "component_type": "relay",
         "default_severity": "critical",
         "rule_group": "fast",
-        "default_params": {},
+        "default_params": {"solar_margin_minutes": 30},
     },
     {
         "code": "power_factor_low",

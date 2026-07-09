@@ -37,8 +37,16 @@ class RecloserOpen(BaseRule):
                 return []
             return [RuleOutcome(status="not_computable", reason=f"relay:{relay.reason}")]
 
-        if not ctx.is_solar_hours():
-            return [RuleOutcome(status="ok", reason="excluded:night")]
+        # margen post-amanecer (T39): hay plantas que abren el reconectador de
+        # noche por operación y lo cierran al arrancar generación (visto:
+        # 3 plantas abiertas a las 05:40 con 60 Hz en red y corrientes 0).
+        # De noche not_computable: una apertura legítima abierta de día no se
+        # resuelve en falso al anochecer.
+        params_gate = ctx.params(self.code)
+        if not ctx.is_solar_hours(
+            margin_minutes=params_gate.get("solar_margin_minutes", 30)
+        ):
+            return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
         if relay.active is None:
             return [
@@ -89,9 +97,10 @@ class PowerFactorLow(BaseRule):
             return [RuleOutcome(status="not_computable", reason=f"relay:{relay.reason}")]
 
         # FP solo es representativo cuando la planta genera: de noche solo hay
-        # consumo auxiliar con FP naturalmente malo.
+        # consumo auxiliar con FP naturalmente malo. not_computable (T39): una
+        # alarma de pf abierta de día no se resuelve en falso al anochecer.
         if not ctx.is_solar_hours():
-            return [RuleOutcome(status="ok", reason="excluded:night")]
+            return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
         # planta abierta: sin flujo no hay pf que evaluar (la 17 alarma la apertura)
         if relay.active is False:

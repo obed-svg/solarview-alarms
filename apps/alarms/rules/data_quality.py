@@ -44,14 +44,22 @@ def _is_frozen(values: list[float]) -> bool:
 
 @register
 class PoaInvalid(BaseRule):
-    """Regla 15: POA inválida o congelada. Solo en horario solar."""
+    """Regla 15: POA inválida o congelada. Solo con la ventana de evaluación
+    COMPLETAMENTE diurna (T39): al amanecer la ventana de 45 min aún contiene
+    oscuridad y dispara falsos — "frozen 0.0" (cierto de noche), "negative"
+    (offset nocturno del piranómetro, visto -1.0 W/m²) y "zero_with_generation"
+    (generación difusa cruza los 5 kW antes de que el sensor registre). De
+    noche not_computable: congela abiertas sin resolver en falso."""
 
     code = "poa_invalid"
     phase = 2
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
-        if not ctx.is_solar_hours():
-            return [RuleOutcome(status="ok", reason="excluded:night")]
+        params_gate = ctx.params(self.code)
+        if not ctx.is_solar_hours(
+            margin_minutes=params_gate.get("solar_margin_minutes", 60)
+        ):
+            return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
         poa = ctx.poa_series()
         if isinstance(poa, Unavailable):
@@ -115,13 +123,18 @@ class DataFrozen(BaseRule):
     phase = 2
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
-        if not ctx.is_solar_hours():
+        params = ctx.params(self.code)
+        # ventana completamente diurna (T39): al amanecer los 45 min de ventana
+        # aún contienen oscuridad — temperatura/power constantes son normales
+        # (visto: temperature "frozen" en -1.0 = offset nocturno del sensor)
+        if not ctx.is_solar_hours(
+            margin_minutes=params.get("solar_margin_minutes", 60)
+        ):
             return [
-                RuleOutcome(status="ok", dedup_suffix="signal:power",
+                RuleOutcome(status="not_computable", dedup_suffix="signal:power",
                             reason="excluded:night"),
             ]
 
-        params = ctx.params(self.code)
         window_minutes = params["frozen_intervals"] * INTERVAL_MINUTES
         outcomes = []
 
@@ -188,10 +201,13 @@ class TmodInvalid(BaseRule):
                 return []  # sin estación no hay sensor de panel: la regla no aplica
             return [RuleOutcome(status="not_computable", reason=weather.reason)]
 
-        if not ctx.is_solar_hours():
-            return [RuleOutcome(status="ok", reason="excluded:night")]
-
         params = ctx.params(self.code)
+        # ventana completamente diurna (T39), ver PoaInvalid
+        if not ctx.is_solar_hours(
+            margin_minutes=params.get("solar_margin_minutes", 60)
+        ):
+            return [RuleOutcome(status="not_computable", reason="excluded:night")]
+
         window_minutes = params["frozen_intervals"] * INTERVAL_MINUTES
 
         tmod = [

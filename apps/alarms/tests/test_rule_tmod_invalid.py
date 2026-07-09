@@ -94,7 +94,10 @@ class TestTmodInvalid:
         )
         ctx = make_ctx(project, night_weather, now=NIGHT)
 
-        assert TmodInvalid().evaluate(ctx)[0].status == "ok"
+        # T39: not_computable (congela abiertas sin resolver en falso al anochecer)
+        outcome = TmodInvalid().evaluate(ctx)[0]
+        assert outcome.status == "not_computable"
+        assert outcome.reason == "excluded:night"
 
     def test_no_station_does_not_apply(self, project):
         ctx = make_ctx(project, SolarViewNotAssociated("No existe estación"))

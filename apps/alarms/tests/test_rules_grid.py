@@ -58,12 +58,24 @@ class TestRecloserOpen:
 
         assert outcomes[0].status == "not_computable"
 
-    def test_night_is_ok(self, project):
+    def test_night_freezes(self, project):
+        # T39: hay plantas que abren el reconectador de noche por operación →
+        # not_computable congela sin abrir ni resolver en falso
         outcomes = RecloserOpen().evaluate(
             make_ctx(project, relay(active=False), now=NIGHT)
         )
 
-        assert outcomes[0].status == "ok"
+        assert outcomes[0].status == "not_computable"
+        assert outcomes[0].reason == "excluded:night"
+
+    def test_dawn_margin_still_frozen(self, project):
+        # amanecer + margen 30: a las 6:10 las plantas aún están cerrando
+        # sus reconectadores nocturnos
+        outcomes = RecloserOpen().evaluate(
+            make_ctx(project, relay(active=False), now=datetime(2026, 7, 8, 6, 10))
+        )
+
+        assert outcomes[0].status == "not_computable"
         assert outcomes[0].reason == "excluded:night"
 
     def test_maintenance_is_scheduled_opening(self, project):
@@ -172,12 +184,13 @@ class TestPowerFactorLow:
         ) == []
 
     def test_night_is_excluded(self, project):
-        # visto en producción: FP 0.318 a las 18:40 = consumo auxiliar nocturno
+        # visto en producción: FP 0.318 a las 18:40 = consumo auxiliar nocturno.
+        # T39: not_computable (congelar, no resolver en falso al anochecer)
         outcomes = PowerFactorLow().evaluate(
             make_ctx(project, relay(pf=0.318), now=NIGHT)
         )
 
-        assert outcomes[0].status == "ok"
+        assert outcomes[0].status == "not_computable"
         assert outcomes[0].reason == "excluded:night"
 
     def test_self_consumption_does_not_apply(self, db):

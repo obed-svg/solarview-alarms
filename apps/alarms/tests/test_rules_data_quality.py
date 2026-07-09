@@ -106,12 +106,28 @@ class TestPoaInvalid:
         assert outcomes[0].status == "firing"
         assert outcomes[0].evidence["issue"] == "frozen"
 
-    def test_frozen_at_night_is_ok(self, project):
+    def test_frozen_at_night_freezes(self, project):
+        # T39: POA congelada en 0.0 de noche es lo normal; not_computable
+        # congela alarmas abiertas sin resolverlas en falso al anochecer
         night_series = {NIGHT - timedelta(minutes=m): 0.0 for m in range(0, 60)}
         ctx = make_ctx(project, now=NIGHT, weather=weather_of(night_series),
                        power=power_of({}))
 
-        assert PoaInvalid().evaluate(ctx)[0].status == "ok"
+        outcome = PoaInvalid().evaluate(ctx)[0]
+        assert outcome.status == "not_computable"
+        assert outcome.reason == "excluded:night"
+
+    def test_dawn_window_still_excluded(self, project):
+        # T39 (visto al amanecer real): a las 6:30 la ventana de 45 min aún
+        # contiene oscuridad → no evaluar hasta amanecer + margen (60)
+        dawn = datetime(2026, 7, 8, 6, 30)
+        dawn_series = {dawn - timedelta(minutes=m): 0.0 for m in range(0, 60)}
+        ctx = make_ctx(project, now=dawn, weather=weather_of(dawn_series),
+                       power=power_of({}))
+
+        outcome = PoaInvalid().evaluate(ctx)[0]
+        assert outcome.status == "not_computable"
+        assert outcome.reason == "excluded:night"
 
 
 @pytest.mark.django_db
@@ -132,14 +148,16 @@ class TestDataFrozen:
 
         assert outcomes["signal:power"].status == "firing"
 
-    def test_night_is_ok(self, project):
+    def test_night_freezes(self, project):
+        # T39: not_computable de noche (temperatura/power constantes son
+        # normales de noche; no abrir ni resolver en falso)
         frozen_night = {NIGHT - timedelta(minutes=m): 0.0 for m in range(0, 60, 5)}
         ctx = make_ctx(project, now=NIGHT, power=power_of(frozen_night),
                        weather=SolarViewNotAssociated("no estación"))
 
         outcomes = DataFrozen().evaluate(ctx)
 
-        assert all(o.status == "ok" for o in outcomes)
+        assert all(o.status == "not_computable" for o in outcomes)
 
 
 @pytest.mark.django_db
