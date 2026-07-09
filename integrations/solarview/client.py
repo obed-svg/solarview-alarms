@@ -130,6 +130,14 @@ class SolarViewClient:
         raw = self.get(f"project/{project_id}/relay/historical/", params=params)
         return {ts: vals for ts, vals in ((k, v) for k, v in (raw or {}).items())}
 
+    def quoia_live(self, project_id: int):
+        """Mediciones live del medidor de frontera. HOY está roto server-side
+        (500 error "-1" en los 77 proyectos, validado 2026-07-08), pero su 404
+        de negocio ("No se encontraron nodos en Manager para este proyecto")
+        es el ÚNICO indicador que da la API de que un proyecto NO tiene medidor
+        quoia → se usa como oráculo de existencia cuando el histórico falla."""
+        return self.get(f"project/{project_id}/quoia_measurements/")
+
     def quoia_history(self, project_id: int):
         """Mediciones del medidor de frontera (quoia): {ts: {value, unit}} con la
         energía POR INTERVALO (~15 min) de las últimas ~24 h.

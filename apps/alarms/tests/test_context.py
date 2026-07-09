@@ -66,6 +66,70 @@ class TestUnavailable:
 
 
 @pytest.mark.django_db
+class TestQuoiaOracle:
+    """El live (/quoia_measurements/) como oráculo de existencia del medidor
+    cuando el histórico falla (T29)."""
+
+    def test_history_error_and_live_no_nodes_is_not_associated(self, db):
+        # histórico 500 + live "No se encontraron nodos en Manager" → sin medidor
+        client = MagicMock()
+        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
+        client.quoia_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
+        ctx = make_ctx(client=client)
+
+        result = ctx.quoia()
+
+        assert isinstance(result, Unavailable)
+        assert result.reason == "not_associated"
+
+    def test_history_error_and_live_error_keeps_history_reason(self, db):
+        # ambos fallan (caso real hoy: live 500 "-1" con medidor presente)
+        client = MagicMock()
+        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
+        client.quoia_live.side_effect = SolarViewAPIError("-1")
+        ctx = make_ctx(client=client)
+
+        result = ctx.quoia()
+
+        assert isinstance(result, Unavailable)
+        assert "updated_node" in result.reason
+
+    def test_history_ok_never_consults_live(self, db):
+        client = MagicMock()
+        client.quoia_history.return_value = {"2026-07-08 12:00:00": {"value": 8.0, "unit": "kWh"}}
+        ctx = make_ctx(client=client)
+
+        ctx.quoia()
+
+        client.quoia_live.assert_not_called()
+
+    def test_oracle_verdict_is_cached_per_tick(self, db):
+        client = MagicMock()
+        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
+        client.quoia_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
+        ctx = make_ctx(client=client)
+
+        first = ctx.quoia()
+        second = ctx.quoia()
+
+        assert second is first
+        assert client.quoia_history.call_count == 1
+        assert client.quoia_live.call_count == 1
+
+    def test_history_not_associated_skips_live(self, db):
+        # si el backend algún día responde 404 de negocio en el histórico,
+        # no hace falta el oráculo
+        client = MagicMock()
+        client.quoia_history.side_effect = SolarViewNotAssociated("sin medidor")
+        ctx = make_ctx(client=client)
+
+        result = ctx.quoia()
+
+        assert result.reason == "not_associated"
+        client.quoia_live.assert_not_called()
+
+
+@pytest.mark.django_db
 class TestPoaSeries:
     def test_prefers_weather_poa_over_power_irradiance(self):
         client = MagicMock()

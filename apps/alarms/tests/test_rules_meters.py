@@ -106,6 +106,14 @@ class TestMeterNoIncrement:
 
         assert MeterNoIncrement().evaluate(ctx) == []
 
+    def test_never_connected_meter_does_not_apply(self, project):
+        # caso real T29: histórico crashea (updated_node) pero el live revela
+        # que el proyecto no tiene nodos quoia en Manager → la regla no aplica
+        ctx = make_ctx(project, quoia=SolarViewAPIError("updated_node"))
+        ctx.client.quoia_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
+
+        assert MeterNoIncrement().evaluate(ctx) == []
+
     def test_quoia_broken_is_not_computable(self, project):
         # estado actual real: quoia devuelve 500 en todos los proyectos
         ctx = make_ctx(project, quoia=SolarViewAPIError("500"))

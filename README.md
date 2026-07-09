@@ -74,10 +74,11 @@ Llaves del `.env` (nunca commitear):
 - Quoia (medidor de frontera) FUNCIONA en 26/77 proyectos vía
   `/quoia_measurements_history/` **sin parámetros** (T28: cualquier query param
   dispara un 500 del backend; el payload es energía por intervalo ~15 min, no
-  contador). Las reglas 8/9/10 operan con datos reales ahí; en el resto
-  (29 con quoia roto server-side + 22 sin medidor) viven en `not_computable`
-  sin ruido. El endpoint live `/quoia_measurements/` está roto server-side.
-  Ver Bloqueadas en `ROADMAP.md`.
+  contador). Las reglas 8/9/10 operan con datos reales ahí. Para el resto, el
+  live `/quoia_measurements/` (roto para mediciones) actúa de oráculo de
+  existencia (T29): 45 proyectos **sin medidor** → las reglas no aplican (`[]`);
+  6 con medidor pero sin datos → `not_computable` sin ruido. Ver Bloqueadas en
+  `ROADMAP.md`.
 - `state` del inversor: strings legibles con formato `"Modo: detalle"`.
   Observados "Grid-connected" y "Standby: insulation resistance detecting"
   (auto-test rutinario, NO falla — la regla 7 exige calificador

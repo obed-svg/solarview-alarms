@@ -101,11 +101,27 @@ class EvaluationContext:
         )
 
     def quoia(self):
-        # sin fechas: el endpoint devuelve las últimas ~24 h y CUALQUIER query
-        # param provoca un 500 del backend (ver client.quoia_history)
-        return self._cached(
-            "quoia", lambda: self.client.quoia_history(self.project.external_id)
-        )
+        """Mediciones de frontera (últimas ~24 h; sin fechas: cualquier query
+        param provoca un 500 del backend, ver client.quoia_history).
+
+        Si el histórico falla con error de API, consulta el live UNA vez como
+        oráculo de existencia: su 404 de negocio ("No se encontraron nodos en
+        Manager") es la única señal de que el proyecto NO tiene medidor →
+        not_associated y las reglas 8/9/10 no aplican (45/77 proyectos). Si el
+        live también da error (hoy: 500 "-1" con medidor presente), se conserva
+        la razón original → not_computable."""
+        if "quoia" not in self._cache:
+            result = self._cached(
+                "quoia", lambda: self.client.quoia_history(self.project.external_id)
+            )
+            if isinstance(result, Unavailable) and result.reason != "not_associated":
+                try:
+                    self.client.quoia_live(self.project.external_id)
+                except SolarViewNotAssociated:
+                    self._cache["quoia"] = Unavailable("not_associated")
+                except SolarViewError:
+                    pass  # live también falló: conservar la razón del histórico
+        return self._cache["quoia"]
 
     def poa_series(self) -> TimeSeries | Unavailable:
         """POA del proyecto: irradiation_POA de la estación meteo si existe;

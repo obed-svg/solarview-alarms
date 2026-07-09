@@ -311,6 +311,12 @@ sección Post-COMPLETADO):
   (con guardia de cobertura), no `último − primero`. 26/77 proyectos
   entregan datos reales; el endpoint live `/quoia_measurements/` existe pero
   está roto server-side (500 `"-1"` en todos).
+- **Oráculo de existencia del medidor** (T29): la API no dice explícitamente
+  "este proyecto tiene quoia", pero el live responde 404 de negocio ("No se
+  encontraron nodos en Manager") cuando NO lo tiene, vs 500 `"-1"` cuando sí.
+  `ctx.quoia()` consulta el live una vez (solo si el histórico falla, cacheado
+  por tick): sin medidor → `not_associated` → reglas 8/9/10 devuelven `[]`
+  (45 proyectos); con medidor pero sin datos → `not_computable` (6 proyectos).
 
 ## Arquitectura de ejecución con `/loop`
 
