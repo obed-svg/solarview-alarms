@@ -6,6 +6,18 @@ proyecto), NO un contador acumulado — 0.0 de noche, sigue la curva solar.
 El endpoint devuelve las últimas ~24 h y NO acepta parámetros de fecha (ver
 client.quoia_history). En proyectos cuyo quoia sigue roto server-side estas
 reglas viven en not_computable (comportamiento correcto, sin ruido).
+
+Ventana de comparación (T45): la última hora COMPLETA, nunca ventanas
+rodantes. La primera versión comparaba quoia rodante [now-60, now] contra los
+buckets HORARIOS de /generation/ con el bucket de la hora en curso PARCIAL:
+evaluando a los :06 el bucket llevaba 6 minutos → "mismatch 520%" fabricado
+(caso real El Olimpo: medidor 280 vs inversores 274 kWh/h — sanos). Ambas
+fuentes se alinean ahora a la misma hora cerrada:
+- quoia: intervalos etiquetados al CIERRE (real: "14:00:05" = intervalo que
+  termina a las 14:00) → suma sobre (hora_inicio, hora_fin] con tolerancia
+  de deriva de 2 min.
+- generation: bucket etiquetado al INICIO (real: "13:00" = hora 13→14) →
+  el punto exacto de hora_inicio.
 """
 
 from datetime import timedelta
@@ -15,50 +27,58 @@ from apps.alarms.models import Severity
 from integrations.solarview.schemas import parse_ts
 
 from .base import BaseRule, RuleOutcome, register
-from .helpers import poa_sustained_above
 
 MIN_INTERVAL_POINTS = 2
+LABEL_DRIFT = timedelta(minutes=2)  # etiquetas quoia reales: "14:00:05", "15:15:04"
 
 
-def _frontier_energy_kwh(ctx, quoia_raw: dict, window_minutes: int) -> float | None:
-    """Energía de frontera en la ventana: SUMA de los intervalos quoia dentro
-    de ella. None si la cobertura es insuficiente — menos de
-    MIN_INTERVAL_POINTS puntos o puntos que abarcan menos de media ventana
-    (sumar con huecos grandes subestima y produciría falsos "cero energía")."""
-    cutoff = ctx.now - timedelta(minutes=window_minutes)
+def _last_full_hour(ctx, lag_minutes: int = 5):
+    """(inicio, fin) de la última hora completa cuyo cierre ya superó el lag
+    de escritura del backend. A las 12:03 con lag 5 la hora 11→12 aún puede
+    estar incompleta → se evalúa la 10→11; desde las 12:05, la 11→12."""
+    effective = ctx.now - timedelta(minutes=lag_minutes)
+    hour_end = effective.replace(minute=0, second=0, microsecond=0)
+    return hour_end - timedelta(hours=1), hour_end
+
+
+def _frontier_energy_between(quoia_raw: dict, start, end) -> float | None:
+    """Suma de los intervalos quoia dentro de (start, end], tolerando la
+    deriva de segundos de las etiquetas. None si la cobertura es insuficiente:
+    menos de MIN_INTERVAL_POINTS puntos o que abarquen menos de media hora."""
+    lo, hi = start + LABEL_DRIFT, end + LABEL_DRIFT
     points = []
     for key, payload in quoia_raw.items():
         ts = parse_ts(key)
-        if ts is not None and ts >= cutoff and isinstance(payload, dict):
+        if ts is not None and lo < ts <= hi and isinstance(payload, dict):
             if payload.get("value") is not None:
                 points.append((ts, payload["value"]))
     if len(points) < MIN_INTERVAL_POINTS:
         return None
     points.sort()
     span_minutes = (points[-1][0] - points[0][0]).total_seconds() / 60
-    if span_minutes < window_minutes / 2:
+    if span_minutes < (end - start).total_seconds() / 60 / 2:
         return None
     return sum(v for _, v in points)
 
 
-def _inverter_energy_kwh(ctx, window_minutes: int) -> float | None:
-    """Energía de inversores en la ventana según /generation/ (serie horaria)."""
+def _inverter_energy_for_hour(ctx, hour_start) -> float | None:
+    """Bucket de /generation/ etiquetado exactamente en hour_start (hora ya
+    cerrada → energía completa, nunca parcial)."""
     gen = ctx.generation()
     if isinstance(gen, Unavailable):
         return None
-    # borde EXCLUSIVO: el punto horario en now-60min etiqueta la hora anterior
-    # completa; incluirlo duplicaría la energía de la ventana
-    cutoff = ctx.now - timedelta(minutes=window_minutes)
-    values = [v for ts, v in gen.hourly.items() if ts > cutoff and v is not None]
-    if not values:
-        return None
-    return sum(values)
+    for ts, value in gen.hourly.items():
+        if ts == hour_start:
+            return value
+    return None
 
 
 @register
 class MeterNoIncrement(BaseRule):
-    """Regla 9: la frontera no registra energía aunque los inversores generan
-    y hay POA. Sin medidor quoia la regla no aplica.
+    """Regla 9: la frontera no registró energía en la última hora completa
+    aunque los inversores sí generaron (bucket ≥ min_window_energy_kwh — el
+    propio bucket de generación es la prueba de producción, T45). Sin medidor
+    quoia la regla no aplica.
 
     NO aplica en autoconsumo (decisión del usuario 2026-07-08, T35): la
     energía se consume localmente, la frontera puede legítimamente no
@@ -78,28 +98,20 @@ class MeterNoIncrement(BaseRule):
             return [RuleOutcome(status="not_computable", reason=f"quoia:{quoia.reason}")]
 
         params = ctx.params(self.code)
-        window = params["window_minutes"]
-
-        poa_ok = poa_sustained_above(
-            ctx, {**params, "persistence_minutes": window}
+        hour_start, hour_end = _last_full_hour(
+            ctx, params.get("data_lag_minutes", 5)
         )
-        if poa_ok is None:
-            return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
-        if not poa_ok:
-            return [RuleOutcome(status="ok", reason="excluded:low_irradiance")]
 
-        frontier_energy = _frontier_energy_kwh(ctx, quoia, window)
+        frontier_energy = _frontier_energy_between(quoia, hour_start, hour_end)
         if frontier_energy is None:
             return [RuleOutcome(status="not_computable", reason="quoia:ventana_insuficiente")]
 
-        inverter_energy = _inverter_energy_kwh(ctx, window)
+        inverter_energy = _inverter_energy_for_hour(ctx, hour_start)
         if inverter_energy is None:
             return [
                 RuleOutcome(status="not_computable", reason="generation:no_disponible")
             ]
 
-        # piso de energía (T41): al alba la generación de la ventana es <1 kWh
-        # y cualquier diferencia dispara falsos — exigir energía significativa
         min_energy = params.get("min_window_energy_kwh", 10)
         if (
             frontier_energy <= params["delta_zero_kwh"]
@@ -111,7 +123,7 @@ class MeterNoIncrement(BaseRule):
                     evidence={
                         "frontier_energy_kwh": round(frontier_energy, 2),
                         "inverter_energy_kwh": round(inverter_energy, 2),
-                        "window_minutes": window,
+                        "hour": f"{hour_start:%Y-%m-%d %H:%M}-{hour_end:%H:%M}",
                     },
                 )
             ]
@@ -120,8 +132,11 @@ class MeterNoIncrement(BaseRule):
 
 @register
 class MeterInverterMismatch(BaseRule):
-    """Regla 10: |E_inv - E_frontera| / E_inv en ventana horaria.
-    >5% → high; 3-5% → medium (escala si empeora, el engine no baja severidad).
+    """Regla 10: |E_inv - E_frontera| / E_inv sobre la última hora COMPLETA
+    (T45: ambas fuentes alineadas a la misma hora cerrada — comparar una
+    ventana rodante contra un bucket parcial fabricaba mismatch de hasta
+    520% en plantas sanas). >5% → high; 3-5% → medium (escala si empeora,
+    el engine no baja severidad).
 
     NO aplica en autoconsumo (decisión del usuario 2026-07-08, T35): el
     mismatch inversores-vs-frontera es estructural cuando la energía se
@@ -141,19 +156,21 @@ class MeterInverterMismatch(BaseRule):
             return [RuleOutcome(status="not_computable", reason=f"quoia:{quoia.reason}")]
 
         params = ctx.params(self.code)
-        window = params["window_minutes"]
+        hour_start, hour_end = _last_full_hour(
+            ctx, params.get("data_lag_minutes", 5)
+        )
 
-        frontier = _frontier_energy_kwh(ctx, quoia, window)
+        frontier = _frontier_energy_between(quoia, hour_start, hour_end)
         if frontier is None:
             return [RuleOutcome(status="not_computable", reason="quoia:ventana_insuficiente")]
 
-        inverter_energy = _inverter_energy_kwh(ctx, window)
+        inverter_energy = _inverter_energy_for_hour(ctx, hour_start)
         if not inverter_energy:  # None o 0: sin denominador no hay ratio
             return [
                 RuleOutcome(status="not_computable", reason="generation:sin_energia_inv")
             ]
-        # piso de energía (T41, visto al alba real: 0.19-0.94 kWh en ventana →
-        # ratios de 75-100% con diferencias de centésimas de kWh, sin sentido)
+        # piso de energía (T41): sin energía significativa los ratios no
+        # tienen sentido físico (visto: 75-100% con centésimas de kWh)
         min_energy = params.get("min_window_energy_kwh", 10)
         if inverter_energy < min_energy:
             return [
@@ -168,7 +185,7 @@ class MeterInverterMismatch(BaseRule):
             "inverter_energy_kwh": round(inverter_energy, 2),
             "frontier_energy_kwh": round(frontier, 2),
             "mismatch_ratio": round(ratio, 4),
-            "window_minutes": window,
+            "hour": f"{hour_start:%Y-%m-%d %H:%M}-{hour_end:%H:%M}",
         }
         if ratio > params["high_ratio"]:
             return [RuleOutcome(status="firing", severity=Severity.HIGH, evidence=evidence)]

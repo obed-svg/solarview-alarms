@@ -26,8 +26,8 @@ class TestSeededCatalog:
 
         mismatch = AlarmRule.objects.get(code="meter_inverter_mismatch")
         assert mismatch.default_params == {
-            "window_minutes": 60, "alert_ratio": 0.03, "high_ratio": 0.05,
-            "min_window_energy_kwh": 10,  # T41: piso anti-ruido del alba
+            "alert_ratio": 0.03, "high_ratio": 0.05,
+            "min_window_energy_kwh": 10,  # T41 piso; T45: hora completa, sin window_minutes
         }
 
     def test_meter_rules_are_hourly(self):

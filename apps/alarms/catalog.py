@@ -142,12 +142,7 @@ CATALOG = [
         "component_type": "meter",
         "default_severity": "high",
         "rule_group": "hourly",
-        "default_params": {
-            "poa_min_wm2": 100,
-            "window_minutes": 60,
-            "delta_zero_kwh": 0.1,
-            "min_window_energy_kwh": 10,
-        },
+        "default_params": {"delta_zero_kwh": 0.1, "min_window_energy_kwh": 10},
     },
     {
         "code": "meter_inverter_mismatch",
@@ -161,8 +156,7 @@ CATALOG = [
         "default_severity": "high",
         "rule_group": "hourly",
         "default_params": {
-            "window_minutes": 60, "alert_ratio": 0.03, "high_ratio": 0.05,
-            "min_window_energy_kwh": 10,
+            "alert_ratio": 0.03, "high_ratio": 0.05, "min_window_energy_kwh": 10,
         },
     },
     {
