@@ -57,6 +57,19 @@ Punto de partida: `f21ee08` (T35).
   Muerto el viejo por PID; queda solo el del write-lock. Los hourly de 00:23 y
   01:19 con el write-lock: `partial=0`, cero errores.
 
+- **03:27-03:31** — 5 `meter_comm_lost` nuevas al despertar los dataloggers
+  de inversores (~03:00): p148/p145/p146 con medidores parados a las
+  **20:30:0x exactas** (batch nocturno del backend) y p127/p113 con quoia en
+  **cadencia horaria nocturna** (age 61 vs umbral 60 = flap). Fix T38
+  (`78dbe7f`): reglas 8 y 14 de noche → `not_computable` (congela abiertas,
+  no abre/resuelve en falso; corrige también el flap-al-anochecer que T36
+  habría causado a alarmas legítimas de estación). Las 5 quedan abiertas
+  para auto-resolverse de día cuando sus medidores retomen — validación
+  natural.
+- **~03:30** — Runner con `transaction_mode=IMMEDIATE` (Django 5.2) + retry:
+  fin definitivo de los locks de sqlite (los `EvaluationRun.create` de otros
+  hilos quedaban fuera del write-lock).
+
 ## Para decidir en la mañana
 
 - **Backend**: agregar al reporte la irradiancia nocturna imposible de p118
