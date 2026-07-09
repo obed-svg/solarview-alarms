@@ -7,7 +7,11 @@ from django.utils import timezone
 from apps.alarms.context import EvaluationContext
 from apps.alarms.rules.communication import InverterCommLost, MeterCommLost
 from apps.plants.models import Inverter, MaintenanceWindow, Project
-from integrations.solarview.exceptions import SolarViewNotAssociated, SolarViewTimeout
+from integrations.solarview.exceptions import (
+    SolarViewAPIError,
+    SolarViewNotAssociated,
+    SolarViewTimeout,
+)
 from integrations.solarview.schemas import InverterLive
 
 NOW = datetime(2026, 7, 8, 12, 0)
@@ -140,8 +144,27 @@ class TestMeterCommLost:
 
         assert MeterCommLost().evaluate(ctx) == []
 
-    def test_quoia_api_error_is_not_computable(self, project):
-        # caso real actual: quoia devuelve 500 en todos los proyectos
-        ctx = make_ctx(project, [live(1571, 3)], SolarViewTimeout("500"))
+    def test_quoia_timeout_is_not_computable(self, project):
+        # un timeout no prueba ausencia de datos: no alarmar ni resolver
+        ctx = make_ctx(project, [live(1571, 3)], SolarViewTimeout("lento"))
+
+        assert MeterCommLost().evaluate(ctx)[0].status == "not_computable"
+
+    def test_meter_silent_with_live_inverters_fires(self, project):
+        # T34 (caso real: 143, 149, 104, 160, 174, 178): el oráculo confirma
+        # nodos en Manager pero ni el histórico ni el live entregan datos
+        ctx = make_ctx(project, [live(1571, 3)], SolarViewAPIError("updated_node"))
+        ctx.client.quoia_live.side_effect = SolarViewAPIError("-1")
+
+        outcomes = MeterCommLost().evaluate(ctx)
+
+        assert outcomes[0].status == "firing"
+        assert outcomes[0].evidence["last_data_at"] is None
+        assert "sin datos" in outcomes[0].evidence["diagnosis"]
+
+    def test_meter_silent_with_inverters_down_not_computable(self, project):
+        # medidor mudo pero inversores tampoco reportan: no se puede aislar
+        ctx = make_ctx(project, [live(1571, 90)], SolarViewAPIError("updated_node"))
+        ctx.client.quoia_live.side_effect = SolarViewAPIError("-1")
 
         assert MeterCommLost().evaluate(ctx)[0].status == "not_computable"

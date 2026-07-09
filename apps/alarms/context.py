@@ -14,7 +14,11 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone as dj_timezone
 
 from apps.plants.models import MaintenanceWindow
-from integrations.solarview.exceptions import SolarViewError, SolarViewNotAssociated
+from integrations.solarview.exceptions import (
+    SolarViewAPIError,
+    SolarViewError,
+    SolarViewNotAssociated,
+)
 from integrations.solarview.schemas import TimeSeries
 
 
@@ -108,19 +112,27 @@ class EvaluationContext:
         oráculo de existencia: su 404 de negocio ("No se encontraron nodos en
         Manager") es la única señal de que el proyecto NO tiene medidor →
         not_associated y las reglas 8/9/10 no aplican (45/77 proyectos). Si el
-        live también da error (hoy: 500 "-1" con medidor presente), se conserva
-        la razón original → not_computable."""
+        live responde error de API (500 "-1"), el medidor EXISTE (encontró
+        nodos) pero ninguna fuente entrega datos → "meter_silent": la regla 8
+        lo trata como medidor sin comunicación (T34). Timeout/auth del live no
+        afirman nada → se conserva la razón del histórico."""
         if "quoia" not in self._cache:
             result = self._cached(
                 "quoia", lambda: self.client.quoia_history(self.project.external_id)
             )
             if isinstance(result, Unavailable) and result.reason != "not_associated":
+                # meter_silent exige que el histórico haya fallado por API (un
+                # timeout del histórico no prueba ausencia de datos)
+                history_api_error = result.reason.startswith("SolarViewAPIError")
                 try:
                     self.client.quoia_live(self.project.external_id)
                 except SolarViewNotAssociated:
                     self._cache["quoia"] = Unavailable("not_associated")
+                except SolarViewAPIError:
+                    if history_api_error:
+                        self._cache["quoia"] = Unavailable("meter_silent")
                 except SolarViewError:
-                    pass  # live también falló: conservar la razón del histórico
+                    pass  # timeout/auth: conservar la razón del histórico
         return self._cache["quoia"]
 
     def poa_series(self) -> TimeSeries | Unavailable:

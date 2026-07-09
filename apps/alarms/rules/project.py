@@ -20,9 +20,10 @@ class ProjectNoGeneration(BaseRule):
 
     Sobre el reconectador: `active=null` (visto en la API real) o proyecto sin
     relay NO bloquean la alarma — la condición eléctrica basta; el estado se
-    registra en evidence como "unknown"/"none". Las tensiones u_a/u_b/u_c del
-    relay real llegaron en 0 con la planta operando, así que NO se usan como
-    condición hasta validar su semántica con el backend.
+    registra en evidence como "unknown"/"none". Las tensiones NO se interpretan
+    aquí: u_a/u_b/u_c son del lado PLANTA y u_r/u_s/u_t del lado RED (aclarado
+    por el usuario 2026-07-08), y el backend ya las condensa en `active`
+    (abierto/cerrado) — confiar en `active`, no re-derivarlo de voltajes.
     """
 
     code = "project_no_generation"

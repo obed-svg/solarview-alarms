@@ -6,7 +6,11 @@ from django.utils import timezone
 
 from apps.alarms.context import EvaluationContext, Unavailable
 from apps.plants.models import MaintenanceWindow, Project
-from integrations.solarview.exceptions import SolarViewAPIError, SolarViewNotAssociated
+from integrations.solarview.exceptions import (
+    SolarViewAPIError,
+    SolarViewNotAssociated,
+    SolarViewTimeout,
+)
 from integrations.solarview.schemas import WeatherSeries
 
 NOW = datetime(2026, 7, 8, 12, 0)  # mediodía local
@@ -82,11 +86,36 @@ class TestQuoiaOracle:
         assert isinstance(result, Unavailable)
         assert result.reason == "not_associated"
 
-    def test_history_error_and_live_error_keeps_history_reason(self, db):
-        # ambos fallan (caso real hoy: live 500 "-1" con medidor presente)
+    def test_history_error_and_live_error_is_meter_silent(self, db):
+        # caso real (143, 149, 104, 160, 174, 178): el live 500 "-1" confirma
+        # nodos en Manager pero ninguna fuente entrega datos → medidor mudo
         client = MagicMock()
         client.quoia_history.side_effect = SolarViewAPIError("updated_node")
         client.quoia_live.side_effect = SolarViewAPIError("-1")
+        ctx = make_ctx(client=client)
+
+        result = ctx.quoia()
+
+        assert isinstance(result, Unavailable)
+        assert result.reason == "meter_silent"
+
+    def test_history_timeout_never_becomes_meter_silent(self, db):
+        # un timeout del histórico no prueba ausencia de datos
+        client = MagicMock()
+        client.quoia_history.side_effect = SolarViewTimeout("lento")
+        client.quoia_live.side_effect = SolarViewAPIError("-1")
+        ctx = make_ctx(client=client)
+
+        result = ctx.quoia()
+
+        assert isinstance(result, Unavailable)
+        assert "SolarViewTimeout" in result.reason
+
+    def test_live_timeout_keeps_history_reason(self, db):
+        # un timeout del live no afirma nada sobre la existencia del medidor
+        client = MagicMock()
+        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
+        client.quoia_live.side_effect = SolarViewTimeout("lento")
         ctx = make_ctx(client=client)
 
         result = ctx.quoia()

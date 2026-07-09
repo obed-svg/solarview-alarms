@@ -135,9 +135,11 @@ class MeterCommLost(BaseRule):
 
     Solo dispara si los INVERSORES sí reportan (si todo está caído no se puede
     culpar al medidor → not_computable). Proyecto sin medidor quoia: no aplica.
-    Quoia real validado 2026-07-08 (26 proyectos con datos, cadencia ~15 min);
-    en los proyectos cuyo quoia sigue 500 server-side esta regla vive en
-    not_computable, que es el comportamiento correcto.
+    Quoia real validado 2026-07-08 (26 proyectos con datos, cadencia ~15 min).
+
+    Caso "meter_silent" (T34): el oráculo confirmó nodos en Manager pero ni el
+    histórico ni el live entregan datos → medidor presente y mudo. Se trata
+    igual que un histórico vacío: si los inversores sí reportan, ES la alarma.
     """
 
     code = "meter_comm_lost"
@@ -145,10 +147,13 @@ class MeterCommLost(BaseRule):
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
         quoia = ctx.quoia()
-        if isinstance(quoia, Unavailable):
+        meter_silent = isinstance(quoia, Unavailable) and quoia.reason == "meter_silent"
+        if isinstance(quoia, Unavailable) and not meter_silent:
             if quoia.reason == "not_associated":
                 return []
             return [RuleOutcome(status="not_computable", reason=f"quoia:{quoia.reason}")]
+        if meter_silent:
+            quoia = {}  # medidor presente sin datos → seguir al chequeo de inversores
 
         params = ctx.params(self.code)
         threshold = params["stale_minutes"]
@@ -182,14 +187,15 @@ class MeterCommLost(BaseRule):
                 )
             ]
 
-        return [
-            RuleOutcome(
-                status="firing",
-                evidence={
-                    "last_data_at": str(last_at) if last_at else None,
-                    "age_minutes": None if age_minutes is None else round(age_minutes),
-                    "threshold_minutes": threshold,
-                    "inverters_reporting": True,
-                },
+        evidence = {
+            "last_data_at": str(last_at) if last_at else None,
+            "age_minutes": None if age_minutes is None else round(age_minutes),
+            "threshold_minutes": threshold,
+            "inverters_reporting": True,
+        }
+        if meter_silent:
+            evidence["diagnosis"] = (
+                "medidor con nodos en Manager pero sin datos: ni el histórico "
+                "ni el live de quoia entregan mediciones"
             )
-        ]
+        return [RuleOutcome(status="firing", evidence=evidence)]

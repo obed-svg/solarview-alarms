@@ -115,8 +115,14 @@ class TestMeterNoIncrement:
         assert MeterNoIncrement().evaluate(ctx) == []
 
     def test_quoia_broken_is_not_computable(self, project):
-        # estado actual real: quoia devuelve 500 en todos los proyectos
         ctx = make_ctx(project, quoia=SolarViewAPIError("500"))
+
+        assert MeterNoIncrement().evaluate(ctx)[0].status == "not_computable"
+
+    def test_meter_silent_is_not_computable(self, project):
+        # medidor mudo (T34): la regla 8 alarma; 9/10 no pueden computar energía
+        ctx = make_ctx(project, quoia=SolarViewAPIError("updated_node"))
+        ctx.client.quoia_live.side_effect = SolarViewAPIError("-1")
 
         assert MeterNoIncrement().evaluate(ctx)[0].status == "not_computable"
 

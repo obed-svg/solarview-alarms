@@ -77,8 +77,8 @@ Llaves del `.env` (nunca commitear):
   contador). Las reglas 8/9/10 operan con datos reales ahí. Para el resto, el
   live `/quoia_measurements/` (roto para mediciones) actúa de oráculo de
   existencia (T29): 45 proyectos **sin medidor** → las reglas no aplican (`[]`);
-  6 con medidor pero sin datos → `not_computable` sin ruido. Ver Bloqueadas en
-  `ROADMAP.md`.
+  6 con medidor pero sin datos → **alarma `meter_comm_lost`** con diagnóstico
+  (T34). Ver Bloqueadas en `ROADMAP.md`.
 - `state` del inversor: strings legibles con formato `"Modo: detalle"`.
   Observados "Grid-connected" y "Standby: insulation resistance detecting"
   (auto-test rutinario, NO falla — la regla 7 exige calificador
