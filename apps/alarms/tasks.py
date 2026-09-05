@@ -19,10 +19,12 @@ LOCK_TTL = 270  # < soft_time_limit: el lock muere antes que el siguiente tick d
 
 @shared_task
 def dispatch_evaluations(rule_group: str = "fast") -> int:
-    """Fan-out: una tarea evaluate_project por proyecto monitoreado."""
-    project_ids = list(
-        Project.objects.filter(monitoring_enabled=True).values_list("id", flat=True)
-    )
+    """Fan-out: una tarea evaluate_project por proyecto con alarmas.
+
+    `alarmable()` deja fuera el autoconsumo (T49): no se evalúan, así que no
+    abren alarmas ni consumen requests a la API.
+    """
+    project_ids = list(Project.objects.alarmable().values_list("id", flat=True))
     for project_id in project_ids:
         evaluate_project.delay(project_id, rule_group)
     return len(project_ids)
@@ -59,6 +61,9 @@ def check_sla() -> dict:
     open_alarms = (
         Alarm.objects.filter(status=Alarm.Status.ACTIVE)
         .exclude(rule=rule)  # sin recursión sobre los propios breaches
+        # T49: el autoconsumo ya no genera alarmas; sus alarmas viejas tampoco
+        # deben abrir breaches de SLA
+        .filter(project__is_minifarm=True, project__monitoring_enabled=True)
         .select_related("project", "rule")
     )
     for alarm in open_alarms:

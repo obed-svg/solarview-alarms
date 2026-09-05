@@ -17,6 +17,13 @@ def parse_ts(value: str | None) -> datetime | None:
     """Parsea los formatos de timestamp observados en la API real."""
     if not value:
         return None
+    try:
+        # El contrato nuevo mezcla timestamps locales e ISO 8601 con offset.
+        # Internamente se conservan naive en la hora local de la planta.
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=None)
+    except (ValueError, TypeError):
+        pass
     for fmt in _TS_FORMATS:
         try:
             return datetime.strptime(value, fmt)
@@ -41,7 +48,7 @@ def parse_series(raw: dict | None) -> TimeSeries:
     for key, value in (raw or {}).items():
         ts = parse_ts(key)
         if ts is not None:
-            series[ts] = value
+            series[ts] = as_float(value)
     return series
 
 
@@ -93,9 +100,9 @@ class InverterLive:
             id=data["id"],
             dev_name=data.get("dev_name", ""),
             state=data.get("state"),
-            power=data.get("power"),
-            efficiency=data.get("efficiency"),
-            temperature=data.get("temperature"),
+            power=as_float(data.get("power")),
+            efficiency=as_float(data.get("efficiency")),
+            temperature=as_float(data.get("temperature")),
             time=parse_ts(data.get("time")),
             raw=data,
         )
@@ -179,9 +186,37 @@ class GenerationSummary:
     @classmethod
     def from_api(cls, data: dict) -> "GenerationSummary":
         return cls(
-            project_id=data.get("project_id", 0),
-            total_kwh=data.get("total_generation_kwh") or 0.0,
+            project_id=int(data.get("project_id") or 0),
+            total_kwh=as_float(data.get("total_generation_kwh")) or 0.0,
             hourly=parse_series(data.get("generation_kwh")),
+        )
+
+
+@dataclass
+class EnergyPoint:
+    time: datetime | None
+    kwh: float | None
+
+
+@dataclass
+class EnergySeries:
+    """Serie de /measurements/energy/; conserva la unidad declarada por API."""
+
+    project_id: int
+    granularity: str
+    unit: str
+    points: list[EnergyPoint]
+
+    @classmethod
+    def from_api(cls, data: dict) -> "EnergySeries":
+        return cls(
+            project_id=int(data.get("project_id") or 0),
+            granularity=data.get("granularity", ""),
+            unit=data.get("unit", "kWh"),
+            points=[
+                EnergyPoint(parse_ts(point.get("time")), as_float(point.get("kwh")))
+                for point in (data.get("points") or [])
+            ],
         )
 
 

@@ -113,8 +113,8 @@ class TestQuoiaOracle:
     def test_history_error_and_live_no_nodes_is_not_associated(self, db):
         # histórico 500 + live "No se encontraron nodos en Manager" → sin medidor
         client = MagicMock()
-        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
-        client.quoia_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
+        client.border_history.side_effect = SolarViewAPIError("updated_node")
+        client.border_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
         ctx = make_ctx(client=client)
 
         result = ctx.quoia()
@@ -126,8 +126,8 @@ class TestQuoiaOracle:
         # caso real (143, 149, 104, 160, 174, 178): el live 500 "-1" confirma
         # nodos en Manager pero ninguna fuente entrega datos → medidor mudo
         client = MagicMock()
-        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
-        client.quoia_live.side_effect = SolarViewAPIError("-1")
+        client.border_history.side_effect = SolarViewAPIError("updated_node")
+        client.border_live.side_effect = SolarViewAPIError("-1")
         ctx = make_ctx(client=client)
 
         result = ctx.quoia()
@@ -138,8 +138,8 @@ class TestQuoiaOracle:
     def test_history_timeout_never_becomes_meter_silent(self, db):
         # un timeout del histórico no prueba ausencia de datos
         client = MagicMock()
-        client.quoia_history.side_effect = SolarViewTimeout("lento")
-        client.quoia_live.side_effect = SolarViewAPIError("-1")
+        client.border_history.side_effect = SolarViewTimeout("lento")
+        client.border_live.side_effect = SolarViewAPIError("-1")
         ctx = make_ctx(client=client)
 
         result = ctx.quoia()
@@ -150,8 +150,8 @@ class TestQuoiaOracle:
     def test_live_timeout_keeps_history_reason(self, db):
         # un timeout del live no afirma nada sobre la existencia del medidor
         client = MagicMock()
-        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
-        client.quoia_live.side_effect = SolarViewTimeout("lento")
+        client.border_history.side_effect = SolarViewAPIError("updated_node")
+        client.border_live.side_effect = SolarViewTimeout("lento")
         ctx = make_ctx(client=client)
 
         result = ctx.quoia()
@@ -161,37 +161,37 @@ class TestQuoiaOracle:
 
     def test_history_ok_never_consults_live(self, db):
         client = MagicMock()
-        client.quoia_history.return_value = {"2026-07-08 12:00:00": {"value": 8.0, "unit": "kWh"}}
+        client.border_history.return_value = {"2026-07-08 12:00:00": {"value": 8.0, "unit": "kWh"}}
         ctx = make_ctx(client=client)
 
         ctx.quoia()
 
-        client.quoia_live.assert_not_called()
+        client.border_live.assert_not_called()
 
     def test_oracle_verdict_is_cached_per_tick(self, db):
         client = MagicMock()
-        client.quoia_history.side_effect = SolarViewAPIError("updated_node")
-        client.quoia_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
+        client.border_history.side_effect = SolarViewAPIError("updated_node")
+        client.border_live.side_effect = SolarViewNotAssociated("No se encontraron nodos")
         ctx = make_ctx(client=client)
 
         first = ctx.quoia()
         second = ctx.quoia()
 
         assert second is first
-        assert client.quoia_history.call_count == 1
-        assert client.quoia_live.call_count == 1
+        assert client.border_history.call_count == 1
+        assert client.border_live.call_count == 1
 
     def test_history_not_associated_skips_live(self, db):
         # si el backend algún día responde 404 de negocio en el histórico,
         # no hace falta el oráculo
         client = MagicMock()
-        client.quoia_history.side_effect = SolarViewNotAssociated("sin medidor")
+        client.border_history.side_effect = SolarViewNotAssociated("sin medidor")
         ctx = make_ctx(client=client)
 
         result = ctx.quoia()
 
         assert result.reason == "not_associated"
-        client.quoia_live.assert_not_called()
+        client.border_live.assert_not_called()
 
 
 @pytest.mark.django_db

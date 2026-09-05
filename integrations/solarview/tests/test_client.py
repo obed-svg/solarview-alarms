@@ -23,85 +23,94 @@ def envelope(results, success=True, message="OK", error=None):
 
 class TestBaseUrlNormalization:
     def test_prepends_https_when_scheme_missing(self):
-        client = SolarViewClient(base_url="api.sole.tech", token="t")
-        assert client.base_url == "https://api.sole.tech"
+        assert SolarViewClient(base_url="api.sole.tech", token="t").base_url == (
+            "https://api.sole.tech"
+        )
 
     def test_strips_trailing_slash(self):
-        client = SolarViewClient(base_url="https://api.test/", token="t")
-        assert client.base_url == "https://api.test"
+        assert SolarViewClient(base_url="https://api.test/", token="t").base_url == BASE
 
 
 class TestGet:
     @responses.activate
-    def test_returns_results_and_sends_token_auth_via_monitoring(self):
-        responses.get(f"{BASE}/monitoring/project/", json=envelope([{"id": 1}]))
+    def test_returns_results_and_sends_token_auth_via_solarview(self):
+        responses.get(
+            f"{BASE}/solarview/config/company-projects/",
+            json=envelope([{"id": 1}]),
+        )
 
-        result = make_client().get("project/")
+        result = make_client().get("config/company-projects/")
 
         assert result == [{"id": 1}]
         request = responses.calls[0].request
         assert request.headers["Authorization"] == "Token secret-token"
-        assert "/monitoring/" in request.url
+        assert request.headers["Accept"] == "application/json"
+        assert "/solarview/" in request.url
+        assert "/monitoring/" not in request.url
 
     @responses.activate
     def test_passes_query_params(self):
-        responses.get(f"{BASE}/monitoring/project/1/power/", json=envelope({}))
+        responses.get(f"{BASE}/solarview/measurements/power/", json=envelope({}))
 
-        make_client().get("project/1/power/", params={"total_power": "1"})
+        make_client().get("measurements/power/", params={"project_id": 1, "total_power": 1})
 
+        assert "project_id=1" in responses.calls[0].request.url
         assert "total_power=1" in responses.calls[0].request.url
 
     @responses.activate
     def test_business_404_raises_not_associated(self):
         responses.get(
-            f"{BASE}/monitoring/project/121/weather/",
+            f"{BASE}/solarview/measurements/weather/",
             json=envelope({}, success=False, message="No existe estación meteorológica"),
             status=404,
         )
 
         with pytest.raises(SolarViewNotAssociated, match="No existe estación"):
-            make_client().get("project/121/weather/")
+            make_client().get("measurements/weather/")
 
     @responses.activate
     def test_envelope_success_false_raises_api_error(self):
         responses.get(
-            f"{BASE}/monitoring/project/1/quoia_measurements_history/",
-            json=envelope({}, success=False, message="No se pudo realizar la petición",
-                          error="ProjectInfo matching query does not exist."),
+            f"{BASE}/solarview/measurements/border/historical/",
+            json=envelope({}, success=False, message="No se pudo realizar la petición"),
             status=500,
         )
 
         with pytest.raises(SolarViewAPIError):
-            make_client().get("project/1/quoia_measurements_history/")
+            make_client().get("measurements/border/historical/")
 
     @responses.activate
     def test_401_raises_auth_error(self):
-        responses.get(f"{BASE}/monitoring/project/", json={"detail": "bad token"}, status=401)
+        responses.get(
+            f"{BASE}/solarview/config/company-projects/",
+            json={"detail": "bad token"},
+            status=401,
+        )
 
         with pytest.raises(SolarViewAuthError):
-            make_client().get("project/")
+            make_client().get("config/company-projects/")
 
     @responses.activate
     def test_timeout_raises_solarview_timeout(self):
         responses.get(
-            f"{BASE}/monitoring/project/",
+            f"{BASE}/solarview/config/company-projects/",
             body=requests.exceptions.ConnectTimeout("slow"),
         )
 
         with pytest.raises(SolarViewTimeout):
-            make_client().get("project/")
+            make_client().get("config/company-projects/")
 
     @responses.activate
     def test_retries_on_503_then_succeeds(self):
-        responses.get(f"{BASE}/monitoring/project/", status=503)
-        responses.get(f"{BASE}/monitoring/project/", json=envelope([{"id": 1}]))
+        url = f"{BASE}/solarview/config/company-projects/"
+        responses.get(url, status=503)
+        responses.get(url, json=envelope([{"id": 1}]))
 
-        assert make_client().get("project/") == [{"id": 1}]
+        assert make_client().get("config/company-projects/") == [{"id": 1}]
 
     @responses.activate
-    def test_success_true_with_200_but_no_results_key_returns_raw_body(self):
-        # /generation/ no usa el envelope estándar
+    def test_success_true_with_no_results_returns_raw_body(self):
         raw = {"project_id": 1, "total_generation_kwh": 10.5, "generation_kwh": {}}
-        responses.get(f"{BASE}/monitoring/project/1/generation/", json=raw)
+        responses.get(f"{BASE}/solarview/measurements/generation/", json=raw)
 
-        assert make_client().get("project/1/generation/") == raw
+        assert make_client().get("measurements/generation/") == raw

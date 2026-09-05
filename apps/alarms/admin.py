@@ -1,7 +1,14 @@
 from django.contrib import admin
-from django.utils import timezone
 
-from .models import Alarm, AlarmRule, EvaluationRun, NonComputableInterval, RuleConfig
+from .models import (
+    Alarm,
+    AlarmRule,
+    AlarmStatusHistory,
+    EvaluationRun,
+    NonComputableInterval,
+    RuleConfig,
+)
+from .services import transition_alarm
 
 
 @admin.register(AlarmRule)
@@ -20,30 +27,48 @@ class RuleConfigAdmin(admin.ModelAdmin):
 @admin.register(Alarm)
 class AlarmAdmin(admin.ModelAdmin):
     list_display = (
-        "dedup_key", "severity", "status", "project", "triggered_at",
-        "last_seen_at", "occurrence_count",
+        "dedup_key",
+        "severity",
+        "status",
+        "project",
+        "triggered_at",
+        "last_seen_at",
+        "occurrence_count",
     )
     list_filter = ("status", "severity", "rule", "project")
     search_fields = ("dedup_key",)
     date_hierarchy = "triggered_at"
     readonly_fields = ("evidence", "last_evidence", "dedup_key", "occurrence_count")
-    actions = ["acknowledge", "resolve_manually"]
+    actions = ["acknowledge", "start_maintenance", "resolve_manually"]
 
     @admin.action(description="Reconocer (acknowledge)")
     def acknowledge(self, request, queryset):
-        queryset.filter(status=Alarm.Status.ACTIVE).update(
-            status=Alarm.Status.ACKNOWLEDGED,
-            acknowledged_at=timezone.now(),
-            acknowledged_by=request.user.email or request.user.username,
-        )
+        actor = request.user.email or request.user.username
+        for alarm in queryset.filter(status=Alarm.Status.ACTIVE):
+            transition_alarm(alarm.id, Alarm.Status.ACKNOWLEDGED, actor, "admin")
+
+    @admin.action(description="Marcar en mantenimiento")
+    def start_maintenance(self, request, queryset):
+        actor = request.user.email or request.user.username
+        for alarm in queryset.exclude(status=Alarm.Status.RESOLVED):
+            transition_alarm(alarm.id, Alarm.Status.IN_MAINTENANCE, actor, "admin")
 
     @admin.action(description="Resolver manualmente")
     def resolve_manually(self, request, queryset):
-        queryset.exclude(status=Alarm.Status.RESOLVED).update(
-            status=Alarm.Status.RESOLVED,
-            resolved_at=timezone.now(),
-            resolution_type=Alarm.ResolutionType.MANUAL,
-        )
+        actor = request.user.email or request.user.username
+        for alarm in queryset.exclude(status=Alarm.Status.RESOLVED):
+            transition_alarm(alarm.id, Alarm.Status.RESOLVED, actor, "admin")
+
+
+@admin.register(AlarmStatusHistory)
+class AlarmStatusHistoryAdmin(admin.ModelAdmin):
+    list_display = ("alarm", "from_status", "to_status", "actor", "source", "created_at")
+    list_filter = ("from_status", "to_status", "source")
+    search_fields = ("alarm__dedup_key", "actor")
+    readonly_fields = ("alarm", "from_status", "to_status", "actor", "source", "created_at")
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(NonComputableInterval)
@@ -58,8 +83,14 @@ class EvaluationRunAdmin(admin.ModelAdmin):
     """Dashboard operativo: ¿está corriendo bien la evaluación por proyecto?"""
 
     list_display = (
-        "project", "rule_group", "started_at", "duration", "status",
-        "opened", "resolved", "errors",
+        "project",
+        "rule_group",
+        "started_at",
+        "duration",
+        "status",
+        "opened",
+        "resolved",
+        "errors",
     )
     list_filter = ("status", "rule_group", "project")
     date_hierarchy = "started_at"

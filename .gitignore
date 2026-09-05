@@ -9,11 +9,13 @@ __pycache__/
 # Django
 db.sqlite3
 staticfiles/
+backups/
 
 # Env / secrets
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Tooling
 .pytest_cache/
@@ -22,3 +24,9 @@ staticfiles/
 
 # Office lock files
 .~lock.*#
+
+# Artefactos locales y notas de trabajo; no forman parte del despliegue.
+*.orig
+graphify-out/
+mapeo.txt
+Documentacion_API_SolarView.pdf

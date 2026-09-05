@@ -101,6 +101,7 @@ class Alarm(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Activa"
         ACKNOWLEDGED = "acknowledged", "Reconocida"
+        IN_MAINTENANCE = "in_maintenance", "En mantenimiento"
         RESOLVED = "resolved", "Resuelta"
 
     class ResolutionType(models.TextChoices):
@@ -126,6 +127,8 @@ class Alarm(models.Model):
     last_seen_at = models.DateTimeField()
     acknowledged_at = models.DateTimeField(null=True, blank=True)
     acknowledged_by = models.EmailField(blank=True, default="")
+    maintenance_started_at = models.DateTimeField(null=True, blank=True)
+    maintenance_started_by = models.CharField(max_length=255, blank=True, default="")
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolution_type = models.CharField(
         max_length=10, choices=ResolutionType.choices, blank=True, default=""
@@ -155,6 +158,23 @@ class Alarm(models.Model):
     def build_dedup_key(rule_code: str, project_external_id: int, *suffixes: str) -> str:
         parts = [rule_code, str(project_external_id), *[s for s in suffixes if s]]
         return ":".join(parts)
+
+
+class AlarmStatusHistory(models.Model):
+    """Auditoría de cambios operativos hechos desde WhatsApp o el admin."""
+
+    alarm = models.ForeignKey(Alarm, on_delete=models.CASCADE, related_name="status_history")
+    from_status = models.CharField(max_length=20, choices=Alarm.Status.choices)
+    to_status = models.CharField(max_length=20, choices=Alarm.Status.choices)
+    actor = models.CharField(max_length=255, blank=True, default="")
+    source = models.CharField(max_length=30, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Alarma {self.alarm_id}: {self.from_status} → {self.to_status}"
 
 
 class NonComputableInterval(models.Model):

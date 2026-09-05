@@ -69,15 +69,20 @@ class ProjectNoGeneration(BaseRule):
         if len(power_values) < MIN_WINDOW_POINTS:
             return [RuleOutcome(status="not_computable", reason="power:window_insuficiente")]
 
-        relay = ctx.relay()
-        if isinstance(relay, Unavailable):
-            relay_state = "none" if relay.reason == "not_associated" else "unavailable"
-        elif relay.active is None:
-            relay_state = "unknown"
-        elif relay.active:
-            relay_state = "closed"
+        if ctx.flag_active("recloser_comm_lost"):
+            # No usar un active=False viejo para excluir la alarma de planta:
+            # mientras no hay comunicación, ese estado eléctrico no es vigente.
+            relay_state = "stale"
         else:
-            return [RuleOutcome(status="ok", reason="excluded:recloser_open")]
+            relay = ctx.relay()
+            if isinstance(relay, Unavailable):
+                relay_state = "none" if relay.reason == "not_associated" else "unavailable"
+            elif relay.active is None:
+                relay_state = "unknown"
+            elif relay.active:
+                relay_state = "closed"
+            else:
+                return [RuleOutcome(status="ok", reason="excluded:recloser_open")]
 
         capacity = float(ctx.project.installed_capacity_kw or 0)
         zero_threshold_kw = (

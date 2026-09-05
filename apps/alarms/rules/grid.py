@@ -1,7 +1,7 @@
 """Fase 3 — red/MT y calidad de energía (reconectador).
 
 Decisiones del usuario (2026-07-08, T35):
-- "Planta activa" = `active` de /project/{id}/relay/ — ÚNICA señal de
+- "Planta activa" = `active` de /solarview/config/recloser/?project_id={id} — señal
   abierto/cerrado (el backend ya condensa las tensiones u_a/b/c lado planta y
   u_r/s/t lado red en `active`; nunca re-derivarlo de voltajes).
 - NUNCA usar `relay.kw` en lógica: cada reconectador reporta la potencia en
@@ -20,6 +20,55 @@ from .relay_normalize import normalize_pf
 
 
 @register
+class RecloserCommLost(BaseRule):
+    """Reconectador sin señal durante al menos el umbral configurado.
+
+    La ausencia real de equipo (404/not_associated) significa que la regla no
+    aplica. Un fallo del gateway no demuestra una falla del reconectador y se
+    conserva como not_computable. A diferencia de las alarmas eléctricas, la
+    comunicación se vigila las 24 horas.
+    """
+
+    code = "recloser_comm_lost"
+    phase = 1
+
+    def evaluate(self, ctx) -> list[RuleOutcome]:
+        relay = ctx.relay()
+        if isinstance(relay, Unavailable):
+            if relay.reason == "not_associated":
+                return []
+            return [RuleOutcome(status="not_computable", reason=f"relay:{relay.reason}")]
+
+        threshold_minutes = ctx.params(self.code)["stale_minutes"]
+        if relay.time is None:
+            return [
+                RuleOutcome(
+                    status="firing",
+                    evidence={
+                        "last_data_at": None,
+                        "age_minutes": None,
+                        "threshold_minutes": threshold_minutes,
+                        "detail": "reconectador sin timestamp de medición",
+                    },
+                )
+            ]
+
+        age_minutes = (ctx.now - relay.time).total_seconds() / 60
+        if age_minutes >= threshold_minutes:
+            return [
+                RuleOutcome(
+                    status="firing",
+                    evidence={
+                        "last_data_at": str(relay.time),
+                        "age_minutes": round(age_minutes, 1),
+                        "threshold_minutes": threshold_minutes,
+                    },
+                )
+            ]
+        return [RuleOutcome(status="ok")]
+
+
+@register
 class RecloserOpen(BaseRule):
     """Regla 17: reconectador abierto/disparado en horario solar.
 
@@ -31,6 +80,13 @@ class RecloserOpen(BaseRule):
     phase = 3
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
+        if ctx.flag_active("recloser_comm_lost"):
+            return [
+                RuleOutcome(
+                    status="not_computable", reason="excluded:recloser_comm_lost"
+                )
+            ]
+
         relay = ctx.relay()
         if isinstance(relay, Unavailable):
             if relay.reason == "not_associated":
@@ -89,6 +145,13 @@ class PowerFactorLow(BaseRule):
     def evaluate(self, ctx) -> list[RuleOutcome]:
         if ctx.project.is_self_consumption:
             return []
+
+        if ctx.flag_active("recloser_comm_lost"):
+            return [
+                RuleOutcome(
+                    status="not_computable", reason="excluded:recloser_comm_lost"
+                )
+            ]
 
         relay = ctx.relay()
         if isinstance(relay, Unavailable):

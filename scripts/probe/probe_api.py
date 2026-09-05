@@ -1,6 +1,6 @@
 """Sondeo de la API SolarView real.
 
-Consulta los endpoints via /monitoring/ con el static_token del .env, graba los
+Consulta los endpoints via /solarview/ con el static_token del .env, graba los
 responses como fixtures JSON y reporta hallazgos (cadencias, formatos, codigos).
 
 Uso:
@@ -33,11 +33,11 @@ AUTH_STYLES = {
 
 
 def detect_auth(base_url: str, token: str) -> dict | None:
-    """Prueba estilos de auth contra /monitoring/project/ y devuelve el primero que da 200."""
+    """Prueba auth contra el inventario canónico y devuelve el estilo válido."""
     for name, builder in AUTH_STYLES.items():
         try:
             resp = requests.get(
-                f"{base_url}/monitoring/project/",
+                f"{base_url}/solarview/config/company-projects/",
                 headers=builder(token),
                 timeout=(5, 30),
             )
@@ -59,13 +59,13 @@ def save_fixture(name: str, payload: object) -> None:
 
 
 def fetch(headers: dict, base_url: str, path: str, name: str, params: dict | None = None):
-    url = f"{base_url}/monitoring/{path}"
+    url = f"{base_url}/solarview/{path}"
     try:
         resp = requests.get(url, headers=headers, params=params, timeout=(5, 60))
     except requests.RequestException as exc:
         print(f"[{name}] {path} -> error de red: {type(exc).__name__}: {exc}")
         return None
-    print(f"[{name}] GET /monitoring/{path} params={params} -> HTTP {resp.status_code}")
+    print(f"[{name}] GET /solarview/{path} params={params} -> HTTP {resp.status_code}")
     if resp.status_code != 200:
         print(f"  body (truncado): {resp.text[:300]}")
         return None
@@ -91,9 +91,7 @@ def analyze_cadence(name: str, timestamps: list[str]) -> None:
     if len(parsed) < 2:
         print(f"  [{name}] cadencia: <2 puntos parseables de {len(timestamps)}")
         return
-    deltas = sorted(
-        (b - a).total_seconds() / 60 for a, b in zip(parsed, parsed[1:], strict=False)
-    )
+    deltas = sorted((b - a).total_seconds() / 60 for a, b in zip(parsed, parsed[1:], strict=False))
     mid = deltas[len(deltas) // 2]
     print(
         f"  [{name}] cadencia: n={len(parsed)} min={deltas[0]:.1f}m "
@@ -108,8 +106,8 @@ def main() -> int:
 
     base_url = ""
     for key in (
-        "SOLARSOLARVIEW_BASE_URL",  # nombre real en el .env actual
         "SOLARVIEW_BASE_URL",
+        "SOLARSOLARVIEW_BASE_URL",
         "solarview_base_url",
         "base_url",
         "BASE_URL",
@@ -135,7 +133,7 @@ def main() -> int:
         print("FALLO: ningun estilo de auth devolvio 200")
         return 2
 
-    projects = fetch(headers, base_url, "project/", "project_list")
+    projects = fetch(headers, base_url, "config/company-projects/", "project_list")
     if not projects:
         return 3
 
@@ -144,37 +142,72 @@ def main() -> int:
     if not data:
         print("Sin proyectos visibles para este token")
         return 4
-    project = data[0] if args.project_id is None else next(
-        p for p in data if p["id"] == args.project_id
+    project = (
+        data[0] if args.project_id is None else next(p for p in data if p["id"] == args.project_id)
     )
     pid = project["id"]
     print(f"\nProyecto de sondeo: id={pid} name={project.get('name')!r}\n")
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    fetch(headers, base_url, f"project/{pid}/", "project_detail_basic")
-    inv = fetch(headers, base_url, f"project/{pid}/inverter/", "inverters_live")
-    fetch(headers, base_url, f"project/{pid}/power/", "power_today", {"total_power": "1"})
-    weather = fetch(
-        headers, base_url, f"project/{pid}/weather/",
-        "weather_today",
-        {"date_from": f"{today} 00:00:00-05:00", "date_to": f"{today} 23:59:59-05:00"},
-    )
-    fetch(headers, base_url, f"project/{pid}/relay/", "relay_now")
-    # SIN params: cualquier query param dispara el 500 `updated_node` del backend
-    quoia = fetch(
-        headers, base_url, f"project/{pid}/quoia_measurements_history/",
-        "quoia_history_today",
+    fetch(headers, base_url, f"config/project-detail/{pid}/", "project_detail_basic")
+    inv = fetch(
+        headers, base_url, "measurements/inverters-list/", "inverters_live", {"project_id": pid}
     )
     fetch(
-        headers, base_url, f"project/{pid}/generation/",
-        "generation_today", {"start_date": today, "end_date": today},
+        headers,
+        base_url,
+        "measurements/power/",
+        "power_today",
+        {"project_id": pid, "total_power": 1},
     )
-    fetch(headers, base_url, f"project/{pid}/measurements-dc/", "measurements_dc_cs",
-          {"variable": "cs"})
-    fetch(headers, base_url, f"project/{pid}/measurement/", "measurement_vp1",
-          {"variable": "vp1"})
-    fetch(headers, base_url, f"project_availability_detail/{pid}/", "availability_detail")
+    weather = fetch(
+        headers,
+        base_url,
+        "measurements/weather/",
+        "weather_today",
+        {
+            "project_id": pid,
+            "date_from": f"{today} 00:00:00-05:00",
+            "date_to": f"{today} 23:59:59-05:00",
+        },
+    )
+    fetch(headers, base_url, "config/recloser/", "relay_now", {"project_id": pid})
+    quoia = fetch(
+        headers,
+        base_url,
+        "measurements/border/historical/",
+        "quoia_history_today",
+        {
+            "project_id": pid,
+            "init_date": f"{today}T00:00:00-05:00",
+            "end_date": f"{today}T23:59:59-05:00",
+        },
+    )
+    fetch(
+        headers,
+        base_url,
+        "measurements/generation/",
+        "generation_today",
+        {"project_id": pid, "start_date": today, "end_date": today},
+    )
+    fetch(
+        headers,
+        base_url,
+        "measurements/dc/",
+        "measurements_dc_cs",
+        {"project_id": pid, "variable": "cs"},
+    )
+    fetch(
+        headers,
+        base_url,
+        "measurements/ac/",
+        "measurement_vp1",
+        {"project_id": pid, "variable": "vp1"},
+    )
+    fetch(
+        headers, base_url, "kpis/availability/detail/", "availability_detail", {"project_id": pid}
+    )
 
     print("\n--- Analisis de cadencias ---")
     if inv:

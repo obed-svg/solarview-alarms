@@ -31,6 +31,21 @@ class TestProject:
         assert project.monitoring_enabled is True
         assert project.timezone == "America/Bogota"
         assert project.raw == {}
+        assert project.discord_thread_id == ""
+
+    def test_alarmable_solo_minigranjas_monitoreadas(self):
+        # T49: la API solo marca is_minifarm; el resto es autoconsumo y no alarma
+        minifarm = make_project(is_minifarm=True)
+        make_project(external_id=105, name="Gimnasio San Ángelo", is_minifarm=False)
+        make_project(
+            external_id=151, name="DEPRECATED", is_minifarm=True, monitoring_enabled=False
+        )
+
+        assert list(Project.objects.alarmable()) == [minifarm]
+        assert minifarm.alarms_enabled is True
+
+    def test_alarms_enabled_falso_en_autoconsumo(self):
+        assert make_project(is_minifarm=False).alarms_enabled is False
 
 
 @pytest.mark.django_db

@@ -2,6 +2,39 @@ from django.db import models
 from django.db.models import Q
 
 
+class ProjectQuerySet(models.QuerySet):
+    def alarmable(self):
+        """Proyectos que generan alarmas (T49, decisión del usuario).
+
+        Solo minigranjas. La API marca `is_minifarm` y nada más — su campo
+        `is_self_consumption` viene en False para los 77 proyectos —, así que
+        el resto de la flota (autoconsumo: techos de clientes) queda fuera:
+        generaba spam sin dueño operativo.
+        """
+        return self.filter(monitoring_enabled=True, is_minifarm=True)
+
+
+class Zone(models.Model):
+    """Agrupación operativa de proyectos y su grupo de WhatsApp."""
+
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=100, unique=True)
+    whatsapp_group_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="ID del grupo creado/habilitado en WhatsApp Groups API.",
+    )
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Project(models.Model):
     """Espejo local de un proyecto de la API SolarView (sincronizado por sync_catalog)."""
 
@@ -26,11 +59,37 @@ class Project(models.Model):
     # aplican. sync_catalog NUNCA lo toca (igual que monitoring_enabled).
     ignore_weather_station = models.BooleanField(default=False)
     monitoring_enabled = models.BooleanField(default=True)
+    zone = models.ForeignKey(
+        Zone,
+        on_delete=models.SET_NULL,
+        related_name="projects",
+        null=True,
+        blank=True,
+        help_text="Zona operativa cuyo grupo de WhatsApp recibe las alarmas.",
+    )
+    # Campo legado conservado durante la migración para no perder la configuración histórica.
+    # Hilo de Discord del proyecto (T49): las alarmas van al MISMO webhook/canal,
+    # con `?thread_id=<este id>` para caer en el hilo del proyecto. Vacío = al
+    # canal raíz (visible a propósito: delata un hilo sin configurar).
+    # sync_catalog NUNCA lo toca (igual que monitoring_enabled).
+    discord_thread_id = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="ID del hilo de Discord del proyecto (?thread_id=). Vacío = canal raíz",
+    )
     raw = models.JSONField(default=dict, blank=True)
     synced_at = models.DateTimeField()
 
+    objects = ProjectQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.name} (#{self.external_id})"
+
+    @property
+    def alarms_enabled(self) -> bool:
+        """Espejo por instancia de ProjectQuerySet.alarmable()."""
+        return self.monitoring_enabled and self.is_minifarm
 
 
 class Inverter(models.Model):
@@ -74,7 +133,10 @@ class MaintenanceWindow(models.Model):
         Project, on_delete=models.CASCADE, related_name="maintenance_windows"
     )
     inverter = models.ForeignKey(
-        Inverter, on_delete=models.CASCADE, null=True, blank=True,
+        Inverter,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         help_text="Vacío = aplica a todo el proyecto",
     )
     component_type = models.CharField(max_length=20, blank=True, default="")
@@ -114,7 +176,11 @@ class InverterStateObservation(models.Model):
         default=1, help_text="Avistamientos acumulados (inversor × tick)"
     )
     first_project = models.ForeignKey(
-        Project, null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        Project,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
         help_text="Proyecto donde se observó por primera vez",
     )
     first_dev_name = models.CharField(max_length=200, blank=True, default="")

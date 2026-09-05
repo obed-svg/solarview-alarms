@@ -73,7 +73,7 @@ TIME_ZONE = "America/Bogota"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -96,9 +96,20 @@ CELERY_TASK_SOFT_TIME_LIMIT = 240
 CELERY_TASK_TIME_LIMIT = 300
 
 # SolarView API externa (secretos leídos del .env en runtime).
-# La llave real en el .env actual es SOLARSOLARVIEW_BASE_URL (sic).
+# SOLARSOLARVIEW_BASE_URL se conserva como fallback para instalaciones existentes.
 SOLARVIEW_BASE_URL = env(
-    "SOLARSOLARVIEW_BASE_URL", default=env("SOLARVIEW_BASE_URL", default="")
+    "SOLARVIEW_BASE_URL",
+    default=env("SOLARSOLARVIEW_BASE_URL", default=""),
 )
 SOLARVIEW_STATIC_TOKEN = env("static_token", default="")
+DISCORD_BOT_TOKEN = env("discord_bot_token", default="")
+DISCORD_APPLICATION_ID = env("discord_application_id", default="")
+DISCORD_PUBLIC_KEY = env("discord_public_key", default="")
+DISCORD_GUILD_ID = env("discord_guild_id", default="")
 WEBHOOK_DISCORD = env("webhook_discord", default="")
+
+# WhatsApp Cloud API / Groups API
+WHATSAPP_API_VERSION = env("WHATSAPP_API_VERSION", default="v23.0")
+WHATSAPP_PHONE_NUMBER_ID = env("WHATSAPP_PHONE_NUMBER_ID", default="")
+WHATSAPP_VERIFY_TOKEN = env("WHATSAPP_VERIFY_TOKEN", default="")
+WHATSAPP_APP_SECRET = env("WHATSAPP_APP_SECRET", default="")

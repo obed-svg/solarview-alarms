@@ -17,11 +17,15 @@ from apps.notifications.tasks import send_notification
 from apps.plants.models import Project
 
 WEBHOOK = "https://discord.com/api/webhooks/123/abc"
+THREAD = "1400000000000000001"
+WEBHOOK_THREAD = f"{WEBHOOK}?thread_id={THREAD}"
 
 
 @pytest.fixture
 def alarm(db):
-    project = Project.objects.create(external_id=146, name="El Son", synced_at=timezone.now())
+    project = Project.objects.create(
+        external_id=146, name="El Son", is_minifarm=True, synced_at=timezone.now()
+    )
     rule = AlarmRule.objects.get(code="project_no_generation")
     now = timezone.now()
     return Alarm.objects.create(
@@ -53,9 +57,69 @@ class TestEmbed:
         assert {"Proyecto", "Evento", "Evidencia"} <= field_names
         assert "El Son" in str(embed["fields"])
 
+    def test_mismatch_se_muestra_como_porcentaje(self, alarm, channel):
+        alarm.evidence = {"mismatch_ratio": 0.5245, "mismatch_percent": 52.45}
+        alarm.save(update_fields=["evidence"])
+
+        payload = DiscordChannel(channel).build_payload("opened", alarm)
+        evidence = next(
+            field["value"]
+            for field in payload["embeds"][0]["fields"]
+            if field["name"] == "Evidencia"
+        )
+
+        assert "diferencia_absoluta: 52.45%" in evidence
+
+@pytest.mark.django_db
+class TestThreadPorProyecto:
+    """T49: un webhook, un canal; el hilo lo pone el proyecto con ?thread_id=."""
+
+    def test_url_lleva_thread_id_del_proyecto(self, alarm, channel):
+        alarm.project.discord_thread_id = THREAD
+        alarm.project.save()
+
+        assert DiscordChannel(channel)._url(alarm) == WEBHOOK_THREAD
+
+    def test_sin_hilo_configurado_va_al_canal_raiz(self, alarm, channel):
+        assert DiscordChannel(channel)._url(alarm) == WEBHOOK
+
+    def test_webhook_con_query_previa_concatena_con_ampersand(self, alarm, channel, monkeypatch):
+        monkeypatch.setenv("webhook_discord", f"{WEBHOOK}?wait=true")
+        alarm.project.discord_thread_id = THREAD
+        alarm.project.save()
+
+        assert DiscordChannel(channel)._url(alarm) == f"{WEBHOOK}?wait=true&thread_id={THREAD}"
+
+    @responses.activate
+    def test_envio_postea_al_hilo_y_lo_deja_como_destino(self, alarm, channel):
+        alarm.project.discord_thread_id = THREAD
+        alarm.project.save()
+        responses.post(WEBHOOK_THREAD, status=204)
+        log = NotificationLog.objects.create(alarm=alarm, channel=channel, event="opened")
+
+        send_notification.run(log.id)
+
+        log.refresh_from_db()
+        assert log.status == NotificationLog.Status.SENT
+        # el destino trazado es el hilo, y no hizo el GET al webhook (ya sabe dónde publica)
+        assert log.target_channel_id == THREAD
+        assert len(responses.calls) == 1
+        assert responses.calls[0].request.url == WEBHOOK_THREAD
+
 
 @pytest.mark.django_db
 class TestDispatcher:
+    @patch("apps.notifications.dispatcher.send_notification")
+    def test_skips_autoconsumo_project(self, task, alarm, channel):
+        # T49: solo minigranjas; el autoconsumo generaba spam
+        alarm.project.is_minifarm = False
+        alarm.project.save()
+
+        notify(alarm, "opened")
+
+        assert NotificationLog.objects.count() == 0
+        assert task.delay.call_count == 0
+
     @patch("apps.notifications.dispatcher.send_notification")
     def test_creates_pending_log_and_enqueues(self, task, alarm, channel):
         notify(alarm, "opened")
@@ -63,6 +127,15 @@ class TestDispatcher:
         log = NotificationLog.objects.get()
         assert log.status == NotificationLog.Status.PENDING
         assert log.event == "opened"
+        task.delay.assert_called_once_with(log.id)
+
+    @patch("apps.notifications.dispatcher.send_notification")
+    def test_notifies_discord_when_alarm_auto_resolves(self, task, alarm, channel):
+        notify(alarm, NotificationLog.Event.RESOLVED)
+
+        log = NotificationLog.objects.get()
+        assert log.event == NotificationLog.Event.RESOLVED
+        assert log.status == NotificationLog.Status.PENDING
         task.delay.assert_called_once_with(log.id)
 
     @patch("apps.notifications.dispatcher.send_notification")

@@ -42,9 +42,9 @@ def make_ctx(project, inverters=None, quoia=None, poa=None, dc=None):
     else:
         client.project_inverters.return_value = inverters or []
     if isinstance(quoia, Exception):
-        client.quoia_history.side_effect = quoia
+        client.border_history.side_effect = quoia
     else:
-        client.quoia_history.return_value = quoia or {}
+        client.border_history.return_value = quoia or {}
     if isinstance(dc, Exception):
         client.measurements_dc.side_effect = dc
     else:
@@ -216,7 +216,7 @@ class TestMeterCommLost:
         # T34 (caso real: 143, 149, 104, 160, 174, 178): el oráculo confirma
         # nodos en Manager pero ni el histórico ni el live entregan datos
         ctx = make_ctx(project, [live(1571, 3)], SolarViewAPIError("updated_node"))
-        ctx.client.quoia_live.side_effect = SolarViewAPIError("-1")
+        ctx.client.border_live.side_effect = SolarViewAPIError("-1")
 
         outcomes = MeterCommLost().evaluate(ctx)
 
@@ -227,7 +227,7 @@ class TestMeterCommLost:
     def test_meter_silent_with_inverters_down_not_computable(self, project):
         # medidor mudo pero inversores tampoco reportan: no se puede aislar
         ctx = make_ctx(project, [live(1571, 90)], SolarViewAPIError("updated_node"))
-        ctx.client.quoia_live.side_effect = SolarViewAPIError("-1")
+        ctx.client.border_live.side_effect = SolarViewAPIError("-1")
 
         assert MeterCommLost().evaluate(ctx)[0].status == "not_computable"
 
@@ -243,4 +243,4 @@ class TestMeterCommLost:
 
         assert outcomes[0].status == "not_computable"
         assert outcomes[0].reason == "excluded:night"
-        ctx.client.quoia_history.assert_not_called()
+        ctx.client.border_history.assert_not_called()

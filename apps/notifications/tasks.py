@@ -6,7 +6,8 @@ from django.utils import timezone
 
 from .channels.base import CHANNEL_REGISTRY
 from .channels.discord import DiscordRateLimited, WebhookNotConfigured
-from .models import NotificationLog
+from .channels.whatsapp import WhatsAppNotConfigured
+from .models import NotificationChannel, NotificationLog
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,14 @@ logger = logging.getLogger(__name__)
     rate_limit="25/m",  # T43: el webhook de Discord tolera ~30/min
 )
 def send_notification(log_id: int) -> None:
-    log = (
-        NotificationLog.objects.select_related("channel", "alarm", "alarm__rule",
-                                               "alarm__project", "alarm__inverter")
-        .get(id=log_id)
-    )
+    log = NotificationLog.objects.select_related(
+        "channel",
+        "alarm",
+        "alarm__rule",
+        "alarm__project",
+        "alarm__project__zone",
+        "alarm__inverter",
+    ).get(id=log_id)
     if log.status == NotificationLog.Status.SENT:
         return  # idempotencia ante re-entregas del broker
 
@@ -31,15 +35,15 @@ def send_notification(log_id: int) -> None:
     log.attempts += 1
 
     try:
-        target = channel_impl.target_id()
+        target = channel_impl.target_id(log.alarm)
         payload = channel_impl.build_payload(log.event, log.alarm)
-        status_code = channel_impl.send(payload)
-    except WebhookNotConfigured as exc:
+        status_code = channel_impl.send(payload, log.alarm)
+    except (WebhookNotConfigured, WhatsAppNotConfigured) as exc:
         # error de configuración: reintentar no lo arregla
         log.status = NotificationLog.Status.FAILED
         log.last_error = str(exc)
         log.save(update_fields=["status", "last_error", "attempts"])
-        logger.error("Notificación %s sin webhook: %s", log_id, exc)
+        logger.error("Notificación %s sin credencial: %s", log_id, exc)
         return
     except DiscordRateLimited as exc:
         # T43: reintentar exactamente cuando Discord lo indica (no backoff
@@ -64,7 +68,20 @@ def send_notification(log_id: int) -> None:
     log.last_error = ""
     log.save(
         update_fields=[
-            "status", "target_channel_id", "payload", "response_status",
-            "sent_at", "last_error", "attempts",
+            "status",
+            "target_channel_id",
+            "payload",
+            "response_status",
+            "sent_at",
+            "last_error",
+            "attempts",
         ]
     )
+
+
+@shared_task(autoretry_for=(requests.RequestException,), retry_backoff=True, max_retries=8)
+def send_whatsapp_text(channel_id: int, target_group_id: str, body: str) -> None:
+    """Envía respuestas a comandos sin asociarlas artificialmente a una alarma."""
+    channel = NotificationChannel.objects.get(id=channel_id)
+    channel_impl = CHANNEL_REGISTRY[channel.kind](channel)
+    channel_impl.send_text(target_group_id, body)

@@ -41,7 +41,7 @@ def register(cls: type["BaseRule"]) -> type["BaseRule"]:
 class BaseRule(ABC):
     """Una regla por tipo de alarma. `phase` define el orden dentro del tick:
 
-    1 = comunicación (inverter_comm_lost, meter_comm_lost, weather_comm_lost)
+    1 = comunicación (inverter/meter/weather/recloser_comm_lost)
     2 = calidad de datos (pr/availability_inputs_missing, data_frozen, poa_invalid)
     3 = eléctricas/operativas (el resto)
 

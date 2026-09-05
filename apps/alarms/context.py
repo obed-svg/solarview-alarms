@@ -73,9 +73,7 @@ class EvaluationContext:
         )
 
     def power(self):
-        return self._cached(
-            "power", lambda: self.client.project_power(self.project.external_id)
-        )
+        return self._cached("power", lambda: self.client.project_power(self.project.external_id))
 
     def weather(self):
         # T44: estación marcada como NO confiable en admin (sensores faltantes
@@ -111,35 +109,54 @@ class EvaluationContext:
             lambda: self.client.generation(self.project.external_id, day, day),
         )
 
-    def quoia(self):
-        """Mediciones de frontera (últimas ~24 h; sin fechas: cualquier query
-        param provoca un 500 del backend, ver client.quoia_history).
+    def performance_ratio_for_day(self, day) -> dict | Unavailable:
+        """PR histórico calculado por SolarView para una fecha local concreta."""
+        day_string = day.isoformat()
+        return self._cached(
+            f"performance_ratio:{day_string}",
+            lambda: self.client.performance_ratio_historical(
+                self.project.external_id,
+                date_from=day_string,
+                date_to=day_string,
+            ),
+        )
 
-        Si el histórico falla con error de API, consulta el live UNA vez como
-        oráculo de existencia: su 404 de negocio ("No se encontraron nodos en
-        Manager") es la única señal de que el proyecto NO tiene medidor →
-        not_associated y las reglas 8/9/10 no aplican (45/77 proyectos). Si el
-        live responde error de API (500 "-1"), el medidor EXISTE (encontró
-        nodos) pero ninguna fuente entrega datos → "meter_silent": la regla 8
-        lo trata como medidor sin comunicación (T34). Timeout/auth del live no
-        afirman nada → se conserva la razón del histórico."""
+    def quoia(self):
+        """Histórico del medidor de frontera para el día local en curso.
+
+        El contrato nuevo exige un rango ISO explícito en
+        /measurements/border/historical/. Si falla, el endpoint border live se
+        usa únicamente para distinguir un medidor no asociado de uno presente
+        pero silencioso; no se mezclan sus series con el histórico.
+        """
         if "quoia" not in self._cache:
+            day_start = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
+            init_date = day_start.replace(tzinfo=self.tz).isoformat(timespec="seconds")
+            end_date = self.now.replace(tzinfo=self.tz).isoformat(timespec="seconds")
             result = self._cached(
-                "quoia", lambda: self.client.quoia_history(self.project.external_id)
+                "quoia",
+                lambda: self.client.border_history(
+                    self.project.external_id, init_date=init_date, end_date=end_date
+                ),
             )
             if isinstance(result, Unavailable) and result.reason != "not_associated":
-                # meter_silent exige que el histórico haya fallado por API (un
-                # timeout del histórico no prueba ausencia de datos)
                 history_api_error = result.reason.startswith("SolarViewAPIError")
+                day = self.now.strftime("%Y-%m-%d")
                 try:
-                    self.client.quoia_live(self.project.external_id)
+                    self.client.border_live(
+                        self.project.external_id,
+                        variables="eae",
+                        total=True,
+                        date_from=day,
+                        date_to=day,
+                    )
                 except SolarViewNotAssociated:
                     self._cache["quoia"] = Unavailable("not_associated")
                 except SolarViewAPIError:
                     if history_api_error:
                         self._cache["quoia"] = Unavailable("meter_silent")
                 except SolarViewError:
-                    pass  # timeout/auth: conservar la razón del histórico
+                    pass
         return self._cache["quoia"]
 
     def poa_series(self) -> TimeSeries | Unavailable:
@@ -164,9 +181,7 @@ class EvaluationContext:
 
     # --- Ventanas con tolerancia a lag ---
 
-    def series_window(
-        self, series: TimeSeries, minutes: int, lag_minutes: int = 0
-    ) -> TimeSeries:
+    def series_window(self, series: TimeSeries, minutes: int, lag_minutes: int = 0) -> TimeSeries:
         """Puntos en [now - lag - minutes, now - lag]: nunca evalúa el borde
         presente, donde el backend aún puede no haber escrito."""
         end = self.now - timedelta(minutes=lag_minutes)
@@ -223,10 +238,9 @@ class EvaluationContext:
 
     def in_maintenance(self, inverter=None) -> bool:
         aware_now = self.now.replace(tzinfo=self.tz)
-        return (
-            MaintenanceWindow.objects.active_at(self.project, aware_now, inverter=inverter)
-            .exists()
-        )
+        return MaintenanceWindow.objects.active_at(
+            self.project, aware_now, inverter=inverter
+        ).exists()
 
     # --- Flags entre fases (exclusiones "no clasificar si comunicación caída") ---
 

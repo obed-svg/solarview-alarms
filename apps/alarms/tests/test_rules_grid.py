@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.alarms.context import EvaluationContext
 from apps.alarms.engine import validate_registry
-from apps.alarms.rules.grid import PowerFactorLow, RecloserOpen
+from apps.alarms.rules.grid import PowerFactorLow, RecloserCommLost, RecloserOpen
 from apps.plants.models import MaintenanceWindow, Project
 from integrations.solarview.exceptions import SolarViewNotAssociated, SolarViewTimeout
 from integrations.solarview.schemas import RelayStatus
@@ -15,9 +15,9 @@ NOON = datetime(2026, 7, 8, 12, 0)
 NIGHT = datetime(2026, 7, 8, 2, 0)
 
 
-def relay(active=True, pf=0.98, currents=None, kw=240.0, voltages=None):
+def relay(active=True, pf=0.98, currents=None, kw=240.0, voltages=None, time=NOON):
     return RelayStatus(
-        time=NOON, active=active, kw=kw, kva=250.0, pf=pf, f_abc=60.0,
+        time=time, active=active, kw=kw, kva=250.0, pf=pf, f_abc=60.0,
         currents={"i_a": 30.0, "i_b": 30.0, "i_c": 30.0} if currents is None else currents,
         voltages=voltages or {},
     )
@@ -206,5 +206,61 @@ class TestPowerFactorLow:
 @pytest.mark.django_db
 class TestRegistryComplete:
     def test_every_catalog_rule_has_a_class(self):
-        # las 19 reglas de engine (todas menos alarm_sla_breach) tienen clase
+        # todas las reglas de engine (menos alarm_sla_breach) tienen clase
         assert validate_registry() == []
+
+
+@pytest.mark.django_db
+class TestRecloserCommLost:
+    def test_fresh_data_is_ok(self, project):
+        outcome = RecloserCommLost().evaluate(
+            make_ctx(project, relay(time=NOON - timedelta(minutes=4, seconds=59)))
+        )[0]
+
+        assert outcome.status == "ok"
+
+    def test_five_minutes_without_data_fires(self, project):
+        outcome = RecloserCommLost().evaluate(
+            make_ctx(project, relay(time=NOON - timedelta(minutes=5)))
+        )[0]
+
+        assert outcome.status == "firing"
+        assert outcome.evidence["age_minutes"] == 5.0
+        assert outcome.evidence["threshold_minutes"] == 5
+
+    def test_missing_timestamp_fires(self, project):
+        outcome = RecloserCommLost().evaluate(make_ctx(project, relay(time=None)))[0]
+
+        assert outcome.status == "firing"
+        assert outcome.evidence["last_data_at"] is None
+
+    def test_stale_data_fires_at_night_too(self, project):
+        outcome = RecloserCommLost().evaluate(
+            make_ctx(project, relay(time=NIGHT - timedelta(minutes=6)), now=NIGHT)
+        )[0]
+
+        assert outcome.status == "firing"
+
+    def test_project_without_relay_does_not_apply(self, project):
+        assert RecloserCommLost().evaluate(
+            make_ctx(project, SolarViewNotAssociated("Relay not found"))
+        ) == []
+
+    def test_api_error_is_not_recloser_failure(self, project):
+        outcome = RecloserCommLost().evaluate(
+            make_ctx(project, SolarViewTimeout("slow"))
+        )[0]
+
+        assert outcome.status == "not_computable"
+
+    def test_comm_lost_freezes_other_recloser_rules(self, project):
+        ctx = make_ctx(project, relay(active=False, pf=0.5))
+        ctx.set_firing("recloser_comm_lost")
+
+        open_outcome = RecloserOpen().evaluate(ctx)[0]
+        pf_outcome = PowerFactorLow().evaluate(ctx)[0]
+
+        assert open_outcome.status == "not_computable"
+        assert open_outcome.reason == "excluded:recloser_comm_lost"
+        assert pf_outcome.status == "not_computable"
+        assert pf_outcome.reason == "excluded:recloser_comm_lost"

@@ -13,31 +13,55 @@ logger = logging.getLogger(__name__)
 
 @shared_task
 def sync_catalog() -> dict:
-    """Upsert de proyectos e inversores desde la API por external_id.
+    """Sincroniza las minigranjas y sus inversores desde SolarView v1.
 
-    - No toca `monitoring_enabled` (override operativo local).
-    - Inversores que desaparecen de la API se marcan is_active=False, no se borran.
-    - Un proyecto que falla no aborta el sync de los demás.
+    company-projects entrega el inventario básico y project-detail completa la
+    capacidad y los metadatos. Los overrides operativos locales nunca se pisan.
     """
     client = SolarViewClient.from_settings()
     now = timezone.now()
-    stats = {"projects": 0, "inverters": 0, "errors": 0}
+    stats = {"projects": 0, "inverters": 0, "errors": 0, "skipped": 0}
 
     for info in client.list_projects():
+        if not info.is_minifarm:
+            stats["skipped"] += 1
+            demoted = Project.objects.filter(external_id=info.id, is_minifarm=True).update(
+                is_minifarm=False, synced_at=now
+            )
+            if demoted:
+                logger.warning(
+                    "sync_catalog: el proyecto %s (%s) ya no es minigranja en la API; "
+                    "deja de alarmar (la fila se conserva)",
+                    info.id,
+                    info.name,
+                )
+            continue
+
+        try:
+            info = client.project_detail(info.id)
+        except SolarViewError:
+            # No borrar metadatos buenos por un fallo transitorio del detalle.
+            logger.exception("sync_catalog: fallo detalle del proyecto %s", info.id)
+            stats["errors"] += 1
+
+        defaults = {
+            "name": info.name,
+            "plant_code": info.plant_code or "",
+            "latitude": info.lat,
+            "longitude": info.lon,
+            "is_minifarm": info.is_minifarm,
+            "is_self_consumption": info.is_self_consumption,
+            "raw": info.raw,
+            "synced_at": now,
+        }
+        if info.weather_plant_code is not None:
+            defaults["weather_plant_code"] = info.weather_plant_code
+        if info.installed_capacity is not None:
+            defaults["installed_capacity_kw"] = info.installed_capacity
+
         project, _ = Project.objects.update_or_create(
             external_id=info.id,
-            defaults={
-                "name": info.name,
-                "plant_code": info.plant_code or "",
-                "weather_plant_code": info.weather_plant_code or "",
-                "installed_capacity_kw": info.installed_capacity,
-                "latitude": info.lat,
-                "longitude": info.lon,
-                "is_minifarm": info.is_minifarm,
-                "is_self_consumption": info.is_self_consumption,
-                "raw": info.raw,
-                "synced_at": now,
-            },
+            defaults=defaults,
         )
         stats["projects"] += 1
 

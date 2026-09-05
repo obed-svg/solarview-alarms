@@ -1,14 +1,36 @@
 from django.contrib import admin
 
-from .models import Inverter, InverterStateObservation, MaintenanceWindow, Project
+from .models import Inverter, InverterStateObservation, MaintenanceWindow, Project, Zone
+
+
+class ProjectInline(admin.TabularInline):
+    model = Project
+    fields = ("external_id", "name", "monitoring_enabled")
+    readonly_fields = ("external_id", "name")
+    extra = 0
+
+
+@admin.register(Zone)
+class ZoneAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "whatsapp_group_id", "enabled", "project_count")
+    list_filter = ("enabled",)
+    search_fields = ("name", "slug", "whatsapp_group_id")
+    prepopulated_fields = {"slug": ("name",)}
+    inlines = (ProjectInline,)
+
+    @admin.display(description="Proyectos")
+    def project_count(self, zone):
+        return zone.projects.count()
 
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
     list_display = ("external_id", "name", "is_minifarm", "is_self_consumption",
-                    "ignore_weather_station", "monitoring_enabled", "synced_at")
+                    "ignore_weather_station", "monitoring_enabled", "zone",
+                    "synced_at")
+    list_editable = ("zone",)
     list_filter = ("monitoring_enabled", "is_minifarm", "is_self_consumption",
-                   "ignore_weather_station")
+                   "ignore_weather_station", "zone")
     search_fields = ("name", "external_id", "plant_code")
 
 

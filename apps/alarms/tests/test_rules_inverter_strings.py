@@ -19,8 +19,13 @@ def series(value, minutes=30, step=5):
 
 def live(iid, dev_name, power=250.0, state="Grid-connected", temperature=60.0):
     return InverterLive(
-        id=iid, dev_name=dev_name, state=state, power=power, efficiency=98.0,
-        temperature=temperature, time=NOW - timedelta(minutes=3),
+        id=iid,
+        dev_name=dev_name,
+        state=state,
+        power=power,
+        efficiency=98.0,
+        temperature=temperature,
+        time=NOW - timedelta(minutes=3),
     )
 
 
@@ -35,11 +40,16 @@ def make_ctx(project, inverters, dc=None, poa_value=850.0):
     client = MagicMock()
     client.project_inverters.return_value = inverters
     client.project_weather.return_value = WeatherSeries(
-        irradiation={}, irradiation_poa=series(poa_value, step=1),
-        temperature={}, temperature_poa={}, wind_speed={},
+        irradiation={},
+        irradiation_poa=series(poa_value, step=1),
+        temperature={},
+        temperature_poa={},
+        wind_speed={},
     )
     client.project_power.return_value = PowerSeries(
-        unit="kW", power=series(sum(i.power or 0 for i in inverters)), irradiance={},
+        unit="kW",
+        power=series(sum(i.power or 0 for i in inverters)),
+        irradiance={},
     )
     client.measurements_dc.return_value = dc or {}
     return EvaluationContext(project=project, client=client, now=NOW)
@@ -58,6 +68,24 @@ class TestInverterUnavailable:
 
         assert outcomes["inv:1"].status == "firing"
         assert outcomes["inv:2"].status == "ok"
+
+    def test_fires_with_active_power_when_dc_is_absent(self, project):
+        inverters = [live(1, "INV-1", power=0.0), live(2, "INV-2", power=250.0)]
+        ctx = make_ctx(project, inverters, dc={})
+
+        outcomes = {o.dedup_suffix: o for o in InverterUnavailable().evaluate(ctx)}
+
+        assert outcomes["inv:1"].status == "firing"
+        assert outcomes["inv:1"].evidence["confirmation"] == "active_power"
+
+    def test_uses_dc_when_active_power_is_absent(self, project):
+        inverters = [live(1, "INV-1", power=None), live(2, "INV-2", power=250.0)]
+        ctx = make_ctx(project, inverters, dc=self.dc_for("INV-1", 0.0))
+
+        outcomes = {o.dedup_suffix: o for o in InverterUnavailable().evaluate(ctx)}
+
+        assert outcomes["inv:1"].status == "firing"
+        assert outcomes["inv:1"].evidence["confirmation"] == "dc_current"
 
     def test_all_inverters_down_is_project_level_not_this_rule(self, project):
         inverters = [live(1, "INV-1", power=0.0), live(2, "INV-2", power=0.0)]
@@ -127,15 +155,13 @@ class TestInverterDerating:
             live(3, "INV-3", power=245.0, temperature=59.0),
         ]
         outcomes = {
-            o.dedup_suffix: o
-            for o in InverterDerating().evaluate(make_ctx(project, inverters))
+            o.dedup_suffix: o for o in InverterDerating().evaluate(make_ctx(project, inverters))
         }
         assert outcomes["inv:1"].status == "firing"
 
         inverters[0] = live(1, "INV-1", power=100.0, temperature=79.0)
         outcomes = {
-            o.dedup_suffix: o
-            for o in InverterDerating().evaluate(make_ctx(project, inverters))
+            o.dedup_suffix: o for o in InverterDerating().evaluate(make_ctx(project, inverters))
         }
         assert outcomes["inv:1"].status != "firing" or (
             outcomes["inv:1"].evidence.get("trigger") != "temperature"
@@ -145,9 +171,13 @@ class TestInverterDerating:
 @pytest.mark.django_db
 class TestStringZeroCurrent:
     def test_dead_string_with_live_siblings_fires(self, project):
-        dc = {"INV-1": {
-            "cs1": series(0.0), "cs2": series(8.4), "cs3": series(8.1),
-        }}
+        dc = {
+            "INV-1": {
+                "cs1": series(0.0),
+                "cs2": series(8.4),
+                "cs3": series(8.1),
+            }
+        }
         ctx = make_ctx(project, [live(1, "INV-1")], dc=dc)
 
         outcomes = {o.dedup_suffix: o for o in StringZeroCurrent().evaluate(ctx)}
@@ -184,9 +214,13 @@ class TestStringZeroCurrent:
 @pytest.mark.django_db
 class TestStringLowCurrent:
     def test_weak_string_fires(self, project):
-        dc = {"INV-1": {
-            "cs1": series(5.0), "cs2": series(9.0), "cs3": series(9.2),
-        }}
+        dc = {
+            "INV-1": {
+                "cs1": series(5.0),
+                "cs2": series(9.0),
+                "cs3": series(9.2),
+            }
+        }
         ctx = make_ctx(project, [live(1, "INV-1")], dc=dc)
 
         outcomes = {o.dedup_suffix: o for o in StringLowCurrent().evaluate(ctx)}

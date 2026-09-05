@@ -10,17 +10,29 @@ from apps.plants.models import Project
 
 @pytest.fixture
 def project(db):
-    return Project.objects.create(external_id=146, name="El Son", synced_at=timezone.now())
+    return Project.objects.create(
+        external_id=146, name="El Son", is_minifarm=True, synced_at=timezone.now()
+    )
+
+
+@pytest.fixture(autouse=True)
+def enable_sla_for_behavior_tests(db):
+    """La función sigue probada aunque la política de producto la deshabilite."""
+    AlarmRule.objects.filter(code="alarm_sla_breach").update(enabled=True)
 
 
 def make_source_alarm(project, age_minutes, status=Alarm.Status.ACTIVE):
     rule = AlarmRule.objects.get(code="weather_comm_lost")
     triggered = timezone.now() - timedelta(minutes=age_minutes)
     return Alarm.objects.create(
-        rule=rule, project=project, component_type=rule.component_type,
+        rule=rule,
+        project=project,
+        component_type=rule.component_type,
         severity=rule.default_severity,
         dedup_key=Alarm.build_dedup_key(rule.code, project.external_id),
-        triggered_at=triggered, last_seen_at=triggered, status=status,
+        triggered_at=triggered,
+        last_seen_at=triggered,
+        status=status,
     )
 
 
@@ -40,6 +52,16 @@ class TestCheckSla:
         assert breach.severity == Severity.HIGH
         assert breach.dedup_key == f"alarm_sla_breach:146:alarm:{source.id}"
         assert breach.evidence["source_rule"] == "weather_comm_lost"
+
+    def test_autoconsumo_no_abre_breach(self, project):
+        # T49: alarma vieja de un proyecto ya excluido — ni breach ni notificación
+        project.is_minifarm = False
+        project.save()
+        make_source_alarm(project, age_minutes=90)
+
+        check_sla()
+
+        assert breaches().count() == 0
 
     def test_fresh_alarm_no_breach(self, project):
         make_source_alarm(project, age_minutes=30)

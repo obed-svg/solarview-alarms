@@ -5,11 +5,10 @@ Interpretación de "3 intervalos consecutivos" (Excel/COX): intervalos de regist
 IEC de 15 min → ventana de frozen_intervals × 15 min sin variación.
 """
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from apps.alarms.context import Unavailable
 from apps.alarms.models import NonComputableInterval
-from integrations.solarview.schemas import parse_ts
 
 from .base import BaseRule, RuleOutcome, register
 from .helpers import poa_sustained_above
@@ -20,15 +19,28 @@ GENERATION_THRESHOLD_KW = 5.0  # "generación real" para validar POA=0
 FROZEN_EPSILON = 1e-6
 
 
-def _mark_non_computable(ctx, metric: str, missing: list[str], inverter=None,
-                         floor_minutes: int = 60) -> None:
+def _mark_non_computable(
+    ctx,
+    metric: str,
+    missing: list[str],
+    inverter=None,
+    floor_minutes: int = 60,
+    at: datetime | None = None,
+) -> None:
     """Registra el intervalo no calculable (idempotente por constraint + floor)."""
-    floored = ctx.now.replace(second=0, microsecond=0)
-    floored = floored.replace(minute=(floored.minute // floor_minutes) * floor_minutes
-                              if floor_minutes < 60 else 0)
+    floored = (at or ctx.now).replace(second=0, microsecond=0)
+    if floor_minutes >= 1440:
+        floored = floored.replace(hour=0, minute=0)
+    else:
+        floored = floored.replace(
+            minute=(floored.minute // floor_minutes) * floor_minutes if floor_minutes < 60 else 0
+        )
     start = floored.replace(tzinfo=ctx.tz)
     NonComputableInterval.objects.get_or_create(
-        project=ctx.project, inverter=inverter, metric=metric, interval_start=start,
+        project=ctx.project,
+        inverter=inverter,
+        metric=metric,
+        interval_start=start,
         defaults={
             "interval_end": start + timedelta(minutes=floor_minutes),
             "missing_inputs": missing,
@@ -37,10 +49,7 @@ def _mark_non_computable(ctx, metric: str, missing: list[str], inverter=None,
 
 
 def _is_frozen(values: list[float]) -> bool:
-    return (
-        len(values) >= MIN_POINTS
-        and max(values) - min(values) < FROZEN_EPSILON
-    )
+    return len(values) >= MIN_POINTS and max(values) - min(values) < FROZEN_EPSILON
 
 
 @register
@@ -57,9 +66,7 @@ class PoaInvalid(BaseRule):
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
         params_gate = ctx.params(self.code)
-        if not ctx.is_solar_hours(
-            margin_minutes=params_gate.get("solar_margin_minutes", 60)
-        ):
+        if not ctx.is_solar_hours(margin_minutes=params_gate.get("solar_margin_minutes", 60)):
             return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
         poa, poa_source = ctx.poa_with_source()
@@ -75,16 +82,20 @@ class PoaInvalid(BaseRule):
 
         if min(values) < 0:
             return [
-                RuleOutcome(status="firing",
-                            evidence={"issue": "negative", "min_poa": min(values),
-                                      "poa_source": poa_source})
+                RuleOutcome(
+                    status="firing",
+                    evidence={
+                        "issue": "negative",
+                        "min_poa": min(values),
+                        "poa_source": poa_source,
+                    },
+                )
             ]
 
         power = ctx.power()
         if not isinstance(power, Unavailable):
             power_values = [
-                v for v in ctx.series_window(power.power, window_minutes).values()
-                if v is not None
+                v for v in ctx.series_window(power.power, window_minutes).values() if v is not None
             ]
             if (
                 max(values) <= FROZEN_EPSILON
@@ -136,12 +147,11 @@ class DataFrozen(BaseRule):
         # ventana completamente diurna (T39): al amanecer los 45 min de ventana
         # aún contienen oscuridad — temperatura/power constantes son normales
         # (visto: temperature "frozen" en -1.0 = offset nocturno del sensor)
-        if not ctx.is_solar_hours(
-            margin_minutes=params.get("solar_margin_minutes", 60)
-        ):
+        if not ctx.is_solar_hours(margin_minutes=params.get("solar_margin_minutes", 60)):
             return [
-                RuleOutcome(status="not_computable", dedup_suffix="signal:power",
-                            reason="excluded:night"),
+                RuleOutcome(
+                    status="not_computable", dedup_suffix="signal:power", reason="excluded:night"
+                ),
             ]
 
         window_minutes = params["frozen_intervals"] * INTERVAL_MINUTES
@@ -150,21 +160,27 @@ class DataFrozen(BaseRule):
         power = ctx.power()
         if isinstance(power, Unavailable):
             outcomes.append(
-                RuleOutcome(status="not_computable", dedup_suffix="signal:power",
-                            reason=f"power:{power.reason}")
+                RuleOutcome(
+                    status="not_computable",
+                    dedup_suffix="signal:power",
+                    reason=f"power:{power.reason}",
+                )
             )
         else:
             values = [
-                v for v in ctx.series_window(power.power, window_minutes).values()
-                if v is not None
+                v for v in ctx.series_window(power.power, window_minutes).values() if v is not None
             ]
             # 0 constante no cuenta: potencia 0 con POA la cubre project_no_generation
             if _is_frozen(values) and abs(values[0]) > FROZEN_EPSILON:
                 outcomes.append(
                     RuleOutcome(
-                        status="firing", dedup_suffix="signal:power",
-                        evidence={"signal": "power", "value": values[0],
-                                  "window_minutes": window_minutes},
+                        status="firing",
+                        dedup_suffix="signal:power",
+                        evidence={
+                            "signal": "power",
+                            "value": values[0],
+                            "window_minutes": window_minutes,
+                        },
                     )
                 )
             else:
@@ -173,15 +189,20 @@ class DataFrozen(BaseRule):
         weather = ctx.weather()
         if not isinstance(weather, Unavailable) and weather.temperature:
             values = [
-                v for v in ctx.series_window(weather.temperature, window_minutes).values()
+                v
+                for v in ctx.series_window(weather.temperature, window_minutes).values()
                 if v is not None
             ]
             if _is_frozen(values):
                 outcomes.append(
                     RuleOutcome(
-                        status="firing", dedup_suffix="signal:temperature",
-                        evidence={"signal": "temperature", "value": values[0],
-                                  "window_minutes": window_minutes},
+                        status="firing",
+                        dedup_suffix="signal:temperature",
+                        evidence={
+                            "signal": "temperature",
+                            "value": values[0],
+                            "window_minutes": window_minutes,
+                        },
                     )
                 )
             else:
@@ -212,15 +233,14 @@ class TmodInvalid(BaseRule):
 
         params = ctx.params(self.code)
         # ventana completamente diurna (T39), ver PoaInvalid
-        if not ctx.is_solar_hours(
-            margin_minutes=params.get("solar_margin_minutes", 60)
-        ):
+        if not ctx.is_solar_hours(margin_minutes=params.get("solar_margin_minutes", 60)):
             return [RuleOutcome(status="not_computable", reason="excluded:night")]
 
         window_minutes = params["frozen_intervals"] * INTERVAL_MINUTES
 
         tmod = [
-            v for v in ctx.series_window(weather.temperature_poa, window_minutes).values()
+            v
+            for v in ctx.series_window(weather.temperature_poa, window_minutes).values()
             if v is not None
         ]
         if len(tmod) < MIN_POINTS:
@@ -237,7 +257,8 @@ class TmodInvalid(BaseRule):
                     status="firing",
                     evidence={
                         "issue": "out_of_range",
-                        "min_c": min(tmod), "max_c": max(tmod),
+                        "min_c": min(tmod),
+                        "max_c": max(tmod),
                         "valid_range_c": [params["tmod_min_c"], params["tmod_max_c"]],
                     },
                 )
@@ -247,17 +268,22 @@ class TmodInvalid(BaseRule):
             return [
                 RuleOutcome(
                     status="firing",
-                    evidence={"issue": "frozen", "value_c": tmod[0],
-                              "window_minutes": window_minutes},
+                    evidence={
+                        "issue": "frozen",
+                        "value_c": tmod[0],
+                        "window_minutes": window_minutes,
+                    },
                 )
             ]
 
         poa = [
-            v for v in ctx.series_window(weather.irradiation_poa, window_minutes).values()
+            v
+            for v in ctx.series_window(weather.irradiation_poa, window_minutes).values()
             if v is not None
         ]
         tamb = [
-            v for v in ctx.series_window(weather.temperature, window_minutes).values()
+            v
+            for v in ctx.series_window(weather.temperature, window_minutes).values()
             if v is not None
         ]
         if poa and tamb and min(poa) > params["poa_for_coherence_wm2"]:
@@ -290,62 +316,37 @@ class PrInputsMissing(BaseRule):
     phase = 2
 
     def evaluate(self, ctx) -> list[RuleOutcome]:
-        if not ctx.is_solar_hours():
-            return [RuleOutcome(status="ok", reason="excluded:night")]
-
-        # la ventana de 60 min debe ser COMPLETAMENTE diurna (con margen):
-        # evita el flap diario cuando el tick hourly cae en el borde del ocaso
         params = ctx.params(self.code)
-        margin = params.get("solar_margin_minutes", 30)
-        window_start = ctx.now - timedelta(minutes=60)
-        if not (
-            ctx.is_solar_hours(margin_minutes=margin)
-            and ctx.is_solar_hours(at=window_start, margin_minutes=margin)
-        ):
-            return [RuleOutcome(status="ok", reason="excluded:solar_margin")]
+        calculation_at = time(
+            params.get("calculation_hour", 8), params.get("calculation_minute", 5)
+        )
+        if ctx.now.time() < calculation_at:
+            return [RuleOutcome(status="not_computable", reason="pending:solarview_pr_calculation")]
 
-        quoia = ctx.quoia()
-        if isinstance(quoia, Unavailable) and quoia.reason == "not_associated":
-            return []
+        day = ctx.now.date() - timedelta(days=1)
+        pr = ctx.performance_ratio_for_day(day)
+        if isinstance(pr, Unavailable):
+            if pr.reason == "not_associated":
+                return []
+            return [RuleOutcome(status="not_computable", reason=f"pr:{pr.reason}")]
 
-        missing = []
+        if pr:
+            return [RuleOutcome(status="ok")]
 
-        if isinstance(quoia, Unavailable):
-            missing.append("energia_ac")
-        else:
-            timestamps = [ts for ts in (parse_ts(k) for k in quoia) if ts]
-            fresh = [ts for ts in timestamps if (ctx.now - ts) <= timedelta(minutes=60)]
-            if not fresh:
-                missing.append("energia_ac")
-
-        poa = ctx.poa_series()
-        if isinstance(poa, Unavailable) or not ctx.series_window(poa, 60):
-            missing.append("poa")
-
-        dc = ctx.string_currents()
-        if isinstance(dc, Unavailable):
-            missing.append("p_dc")
-        else:
-            has_fresh_dc = any(
-                ctx.series_window(series, 60)
-                for variables in dc.values()
-                for series in variables.values()
+        period_start = datetime.combine(day, time.min)
+        _mark_non_computable(
+            ctx,
+            "pr",
+            ["solarview_pr"],
+            floor_minutes=1440,
+            at=period_start,
+        )
+        return [
+            RuleOutcome(
+                status="firing",
+                evidence={"period": day.isoformat(), "missing_inputs": ["solarview_pr"]},
             )
-            if not has_fresh_dc:
-                missing.append("p_dc")
-
-        # T_mod (temperature_POA) solo exigible si el proyecto tiene estación
-        weather = ctx.weather()
-        if not isinstance(weather, Unavailable):
-            if not ctx.series_window(weather.temperature_poa, 60):
-                missing.append("t_mod")
-
-        if missing:
-            _mark_non_computable(ctx, "pr", missing, floor_minutes=60)
-            return [
-                RuleOutcome(status="firing", evidence={"missing_inputs": missing})
-            ]
-        return [RuleOutcome(status="ok")]
+        ]
 
 
 @register
@@ -361,20 +362,21 @@ class AvailabilityInputsMissing(BaseRule):
         # mismo margen solar que inverter_comm_lost: inversores dormidos al
         # anochecer no son "datos insuficientes"
         params_comm = ctx.params("inverter_comm_lost")
-        if not ctx.is_solar_hours(
-            margin_minutes=params_comm.get("solar_margin_minutes", 45)
-        ):
+        if not ctx.is_solar_hours(margin_minutes=params_comm.get("solar_margin_minutes", 45)):
             return []
 
         # T40: mismo gate físico por POA que la regla 4 — los inversores
         # arrancan por irradiancia, no por reloj (ola matinal de 88 falsas).
         # .get con defaults: DBs sin la migración 0010 no deben explotar.
         # wake_grace (T41): mismo margen de arranque que la regla 4.
-        poa_ok = poa_sustained_above(ctx, {
-            "poa_min_wm2": params_comm.get("poa_min_wm2", 100),
-            "persistence_minutes": params_comm.get("wake_grace_minutes", 45),
-            "data_lag_minutes": params_comm.get("data_lag_minutes", 5),
-        })
+        poa_ok = poa_sustained_above(
+            ctx,
+            {
+                "poa_min_wm2": params_comm.get("poa_min_wm2", 100),
+                "persistence_minutes": params_comm.get("wake_grace_minutes", 45),
+                "data_lag_minutes": params_comm.get("data_lag_minutes", 5),
+            },
+        )
         if poa_ok is None:
             return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
         if not poa_ok:
@@ -412,19 +414,22 @@ class AvailabilityInputsMissing(BaseRule):
             suffix = f"inv:{inv.id}"
             if missing:
                 _mark_non_computable(
-                    ctx, "availability", missing,
-                    inverter=ctx.inverter_model(inv.id), floor_minutes=15,
+                    ctx,
+                    "availability",
+                    missing,
+                    inverter=ctx.inverter_model(inv.id),
+                    floor_minutes=15,
                 )
                 outcomes.append(
                     RuleOutcome(
-                        status="firing", dedup_suffix=suffix,
+                        status="firing",
+                        dedup_suffix=suffix,
                         inverter_external_id=inv.id,
                         evidence={"dev_name": inv.dev_name, "missing_inputs": missing},
                     )
                 )
             else:
                 outcomes.append(
-                    RuleOutcome(status="ok", dedup_suffix=suffix,
-                                inverter_external_id=inv.id)
+                    RuleOutcome(status="ok", dedup_suffix=suffix, inverter_external_id=inv.id)
                 )
         return outcomes

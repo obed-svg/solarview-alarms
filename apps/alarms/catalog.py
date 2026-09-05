@@ -1,4 +1,4 @@
-"""Catálogo de las 20 alarmas de Fase 1 (Excel "Alarmas Solarview" + criterios COX).
+"""Catálogo de las alarmas de Fase 1 (Excel "Alarmas Solarview" + criterios COX).
 
 Fuente única para la data migration de seed. Los umbrales aquí son los DEFAULTS
 globales; los overrides por proyecto viven en RuleConfig.
@@ -137,7 +137,9 @@ CATALOG = [
     {
         "code": "meter_no_increment",
         "name": "Medidor sin incremento con generación",
-        "description": "ΔE_frontera ≈ 0 durante 60 min con generación confirmada y POA > 100.",
+        "description": (
+            "E_frontera ≈ 0 en lo que va del día con generación confirmada de los inversores."
+        ),
         "category": "meter",
         "component_type": "meter",
         "default_severity": "high",
@@ -148,29 +150,32 @@ CATALOG = [
         "code": "meter_inverter_mismatch",
         "name": "Diferencia inversores vs frontera",
         "description": (
-            "ABS(E_inv - E_frontera)/E_inv en ventana horaria: >3% alerta (high), "
-            ">5% escala."
+            "Diferencia absoluta ABS(E_inv - E_frontera)/E_inv sobre la energía "
+            "acumulada del día, mostrada también como porcentaje: >5% alerta "
+            "(medium), >10% escala (high)."
         ),
         "category": "meter",
         "component_type": "meter",
         "default_severity": "high",
         "rule_group": "hourly",
         "default_params": {
-            "alert_ratio": 0.03, "high_ratio": 0.05, "min_window_energy_kwh": 10,
+            "alert_ratio": 0.05,
+            "high_ratio": 0.10,
+            "min_window_energy_kwh": 10,
         },
     },
     {
         "code": "pr_inputs_missing",
         "name": "Datos insuficientes para PR",
         "description": (
-            "Falta energía AC, POA, P_DC o T_mod (esta última solo si el proyecto "
-            "tiene estación). Marca el intervalo como no calculable."
+            "SolarView no calculó el PR del día anterior después de su corte diario. "
+            "Consulta el resultado histórico de SolarView a partir de las 08:05."
         ),
         "category": "data",
         "component_type": "project",
         "default_severity": "critical",
         "rule_group": "hourly",
-        "default_params": {"solar_margin_minutes": 30},
+        "default_params": {"calculation_hour": 8, "calculation_minute": 5},
     },
     {
         "code": "availability_inputs_missing",
@@ -247,6 +252,19 @@ CATALOG = [
         },
     },
     {
+        "code": "recloser_comm_lost",
+        "name": "Reconectador sin señal",
+        "description": (
+            "El reconectador no actualiza su medición durante al menos 5 minutos. "
+            "Se vigila las 24 horas y no aplica a proyectos sin reconectador asociado."
+        ),
+        "category": "grid",
+        "component_type": "relay",
+        "default_severity": "high",
+        "rule_group": "fast",
+        "default_params": {"stale_minutes": 5},
+    },
+    {
         "code": "recloser_open",
         "name": "Reconectador abierto o disparado",
         "description": (
@@ -286,14 +304,15 @@ CATALOG = [
         "code": "alarm_sla_breach",
         "name": "Evento cerca de vencer o vencido",
         "description": (
-            "Alarma ACTIVE sin reconocer por más del SLA. Escala al doble del SLA. "
-            "Corre en el task check_sla, no en el engine."
+            "Capacidad interna deshabilitada para evitar repetir alarmas sin reconocer. "
+            "No se muestra en WhatsApp ni en el resumen general."
         ),
         "category": "om",
         "component_type": "project",
         "default_severity": "high",
         "rule_group": "fast",
         "default_params": {"sla_ack_minutes": 60, "escalate_after_multiplier": 2},
+        "enabled": False,
     },
 ]
 

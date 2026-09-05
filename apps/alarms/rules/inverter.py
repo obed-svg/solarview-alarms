@@ -32,9 +32,9 @@ DERATING_KEYWORDS = ("derat", "limit", "fan", "over-temp", "overtemp")
 class InverterUnavailable(BaseRule):
     """Regla 2: inversor no disponible.
 
-    P_inv ≈ 0 con POA sostenida y OTROS inversores generando. La persistencia
-    de 15 min se verifica con las corrientes DC del inversor (cadencia 5 min):
-    potencia live ≈ 0 puede ser un instante; strings en 0 sostenido no.
+    P_inv ≈ 0 con POA sostenida durante 15 min y OTROS inversores generando.
+    La confirmación usa exclusivamente la potencia activa que reporta
+    SolarView; las corrientes DC no bloquean esta alarma.
     Exclusiones: comm lost (fase 1) → not_computable; mantenimiento → ok;
     todos los inversores caídos → ok (eso es project_no_generation).
     """
@@ -53,13 +53,17 @@ class InverterUnavailable(BaseRule):
             return [RuleOutcome(status="not_computable", reason="poa:no_verificable")]
         if not poa_ok:
             return [
-                RuleOutcome(status="ok", dedup_suffix=f"inv:{inv.id}",
-                            inverter_external_id=inv.id, reason="excluded:low_irradiance")
+                RuleOutcome(
+                    status="ok",
+                    dedup_suffix=f"inv:{inv.id}",
+                    inverter_external_id=inv.id,
+                    reason="excluded:low_irradiance",
+                )
                 for inv in inverters
             ]
 
         zero_kw = params["power_zero_kw"]
-        generating = [inv for inv in inverters if (inv.power or 0) > zero_kw]
+        generating = [inv for inv in inverters if inv.power is not None and inv.power > zero_kw]
         dc = ctx.string_currents()
 
         outcomes = []
@@ -68,71 +72,90 @@ class InverterUnavailable(BaseRule):
 
             if ctx.flag_active("inverter_comm_lost", suffix):
                 outcomes.append(
-                    RuleOutcome(status="not_computable", dedup_suffix=suffix,
-                                inverter_external_id=inv.id,
-                                reason="excluded:inverter_comm_lost")
+                    RuleOutcome(
+                        status="not_computable",
+                        dedup_suffix=suffix,
+                        inverter_external_id=inv.id,
+                        reason="excluded:inverter_comm_lost",
+                    )
                 )
                 continue
             if ctx.in_maintenance(inverter=ctx.inverter_model(inv.id)):
                 outcomes.append(
-                    RuleOutcome(status="ok", dedup_suffix=suffix,
-                                inverter_external_id=inv.id,
-                                reason="excluded:maintenance")
+                    RuleOutcome(
+                        status="ok",
+                        dedup_suffix=suffix,
+                        inverter_external_id=inv.id,
+                        reason="excluded:maintenance",
+                    )
                 )
                 continue
-            if (inv.power or 0) > zero_kw:
+            if inv.power is not None and inv.power > zero_kw:
                 outcomes.append(
-                    RuleOutcome(status="ok", dedup_suffix=suffix,
-                                inverter_external_id=inv.id)
+                    RuleOutcome(status="ok", dedup_suffix=suffix, inverter_external_id=inv.id)
                 )
                 continue
 
             comparables = [g for g in generating if g.id != inv.id]
             if not comparables:
                 outcomes.append(
-                    RuleOutcome(status="ok", dedup_suffix=suffix,
-                                inverter_external_id=inv.id,
-                                reason="excluded:no_comparable_generating")
+                    RuleOutcome(
+                        status="ok",
+                        dedup_suffix=suffix,
+                        inverter_external_id=inv.id,
+                        reason="excluded:no_comparable_generating",
+                    )
                 )
                 continue
 
-            # persistencia: corrientes DC del inversor ≈ 0 en toda la ventana
-            sustained_zero = None
-            if not isinstance(dc, Unavailable) and inv.dev_name in dc:
+            confirmation = "active_power"
+            if inv.power is None:
+                if isinstance(dc, Unavailable) or inv.dev_name not in dc:
+                    outcomes.append(
+                        RuleOutcome(
+                            status="not_computable",
+                            dedup_suffix=suffix,
+                            inverter_external_id=inv.id,
+                            reason="power_y_dc:no_disponibles",
+                        )
+                    )
+                    continue
                 averages = [
-                    window_average(ctx, cs_series, params["persistence_minutes"],
-                                   params.get("data_lag_minutes", 5))
+                    window_average(
+                        ctx,
+                        cs_series,
+                        params["persistence_minutes"],
+                        params.get("data_lag_minutes", 5),
+                    )
                     for cs_series in dc[inv.dev_name].values()
                 ]
-                known = [a for a in averages if a is not None]
-                sustained_zero = bool(known) and all(a <= 0.1 for a in known)
-
-            if sustained_zero is None:
-                outcomes.append(
-                    RuleOutcome(status="not_computable", dedup_suffix=suffix,
-                                inverter_external_id=inv.id,
-                                reason="dc:sin_ventana_para_persistencia")
-                )
-            elif sustained_zero:
-                outcomes.append(
-                    RuleOutcome(
-                        status="firing", dedup_suffix=suffix,
-                        inverter_external_id=inv.id,
-                        evidence={
-                            "dev_name": inv.dev_name,
-                            "power_kw": inv.power,
-                            "state": inv.state,
-                            "comparables_generating": [c.dev_name for c in comparables],
-                            "window_minutes": params["persistence_minutes"],
-                        },
+                known = [average for average in averages if average is not None]
+                if not known or not all(average <= 0.1 for average in known):
+                    outcomes.append(
+                        RuleOutcome(
+                            status="ok",
+                            dedup_suffix=suffix,
+                            inverter_external_id=inv.id,
+                            reason="dc:con_corriente_o_sin_ventana_cero",
+                        )
                     )
+                    continue
+                confirmation = "dc_current"
+            outcomes.append(
+                RuleOutcome(
+                    status="firing",
+                    dedup_suffix=suffix,
+                    inverter_external_id=inv.id,
+                    evidence={
+                        "dev_name": inv.dev_name,
+                        "power_kw": inv.power,
+                        "state": inv.state,
+                        "comparables_generating": [c.dev_name for c in comparables],
+                        "confirmation": confirmation,
+                        "poa_window_minutes": params["persistence_minutes"],
+                    },
                 )
-            else:
-                outcomes.append(
-                    RuleOutcome(status="ok", dedup_suffix=suffix,
-                                inverter_external_id=inv.id,
-                                reason="dc:con_corriente_reciente")
-                )
+            )
         return outcomes
 
 
@@ -156,9 +179,12 @@ class InverterDerating(BaseRule):
 
             if ctx.flag_active("inverter_comm_lost", suffix):
                 outcomes.append(
-                    RuleOutcome(status="not_computable", dedup_suffix=suffix,
-                                inverter_external_id=inv.id,
-                                reason="excluded:inverter_comm_lost")
+                    RuleOutcome(
+                        status="not_computable",
+                        dedup_suffix=suffix,
+                        inverter_external_id=inv.id,
+                        reason="excluded:inverter_comm_lost",
+                    )
                 )
                 continue
 
@@ -166,10 +192,10 @@ class InverterDerating(BaseRule):
             if any(kw in state for kw in DERATING_KEYWORDS):
                 outcomes.append(
                     RuleOutcome(
-                        status="firing", dedup_suffix=suffix,
+                        status="firing",
+                        dedup_suffix=suffix,
                         inverter_external_id=inv.id,
-                        evidence={"trigger": "state", "state": inv.state,
-                                  "dev_name": inv.dev_name},
+                        evidence={"trigger": "state", "state": inv.state, "dev_name": inv.dev_name},
                     )
                 )
                 continue
@@ -184,7 +210,8 @@ class InverterDerating(BaseRule):
             if hot and underproducing:
                 outcomes.append(
                     RuleOutcome(
-                        status="firing", dedup_suffix=suffix,
+                        status="firing",
+                        dedup_suffix=suffix,
                         inverter_external_id=inv.id,
                         evidence={
                             "trigger": "temperature",
@@ -197,7 +224,6 @@ class InverterDerating(BaseRule):
                 )
             else:
                 outcomes.append(
-                    RuleOutcome(status="ok", dedup_suffix=suffix,
-                                inverter_external_id=inv.id)
+                    RuleOutcome(status="ok", dedup_suffix=suffix, inverter_external_id=inv.id)
                 )
         return outcomes
