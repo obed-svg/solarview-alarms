@@ -170,21 +170,19 @@ sudo usermod -aG docker "$USER"
 Cierre y abra nuevamente la sesión SSH. Compruebe con `docker version` y
 `docker compose version`.
 
-### 3. Clonar la versión aprobada
+### 3. Clonar el repositorio
 
-Primero publique el commit o tag ya validado. En la EC2:
+En la EC2:
 
 ```bash
-git clone <URL_DEL_REPOSITORIO> solarview-alarms
+git clone git@github.com:obed-svg/solarview-alarms.git solarview-alarms
 cd solarview-alarms
-git checkout <TAG_O_COMMIT_APROBADO>
 ```
 
-Para actualizar una instalación basada en Git:
+Para actualizar el código en una instalación existente:
 
 ```bash
-git fetch --tags
-git checkout <NUEVO_TAG_O_COMMIT>
+git pull --ff-only
 ./scripts/deploy_ec2.sh --full
 ```
 

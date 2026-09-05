@@ -1,17 +1,24 @@
 # Plan: Módulo de alarmas SolarView (Fase 1)
 
+> Documento histórico del diseño inicial. Las secciones de Discord fueron
+> reemplazadas por WhatsApp por zonas; la arquitectura vigente está en
+> `docs/ARQUITECTURA.md` y en el README.
+> La API fue migrada el 2026-08-29 al contrato canónico `/solarview/`.
+> El mapeo y los parámetros vigentes están en
+> `docs/API_SOLARVIEW_V1.md`.
+
 ## Contexto
 
 Repo greenfield (`solarview-alarms`): sistema que lee datos de la API de monitoreo SolarView, evalúa periódicamente las condiciones de alarma del Excel de requerimientos (solo **Fase = 1**), persiste alarmas en PostgreSQL y notifica a Discord. Luego se agregarán APIs DRF para el frontend (fuera de alcance, pero el diseño lo prevé).
 
 **Decisiones tomadas:**
 - Django + PostgreSQL; Celery + Celery Beat (Redis) para evaluación periódica
-- API externa SIEMPRE por el alias **`/monitoring/`** (no `/api/`)
+- API externa SIEMPRE por el alias **`/solarview/`** (no `/api/`)
 - `.env` (bloqueado para Claude leerlo directo; el código lo lee en runtime con django-environ): `static_token` = token API, `webhook_discord` = webhook Discord
 - No replicar series de tiempo: cada alarma guarda snapshot JSON de "evidencia"
 - Notificaciones: **solo Discord ahora, Gmail eventualmente** → modelo simple con campos explícitos, sin config JSON genérico
 - Cada notificación guarda el **channel ID** de Discord al que se envió (trazabilidad si cambia el canal)
-- **Correcciones de API**: `/inverter/{id}/` NO recibe `variable` (error de la doc). Voltajes DC → `/project/{id}/measurements-dc/`; AC → `/project/{id}/measurement/`
+- **Correcciones de API**: `/inverter/{id}/` NO recibe `variable` (error de la doc). Voltajes DC → `/measurements/dc/?project_id={id}`; AC → `/measurements/ac/?project_id={id}`
 - **Frecuencias reales**: inversores cada 5 min; weather y medidor (quoia) varían de 1 min a 1 h → umbrales de "sin comunicación" configurables por proyecto, se calibran tras sondear las APIs
 - **T_mod era incierto en el diseño inicial** → resuelto después (T22): T_mod = `temperature_POA` (sensor del panel, confirmado por el usuario). Regla 16 activa desde la migración 0004; la regla 11 exige T_mod cuando el proyecto tiene estación
 - **Sondear las APIs reales ANTES de implementar** cada consumo (token ya en `.env`)
@@ -30,7 +37,7 @@ docker-compose.yml            # postgres:16, redis:7
 
 ## ¿Qué es `apps/plants` y por qué existe? (pregunta 1 y 3)
 
-**Sí: es un cache local de lo que trae la API** (`/monitoring/project/` y `/monitoring/project/{id}/inverter/`). Un task Celery (`sync_catalog`, cada hora) trae la lista y hace upsert por `external_id`.
+**Sí: es un cache local de lo que trae la API** (`/solarview/config/company-projects/` y `/solarview/measurements/inverters-list/?project_id={id}`). Un task Celery (`sync_catalog`, cada hora) trae la lista y hace upsert por `external_id`.
 
 Por qué no consultar la API cada vez:
 1. **Las alarmas necesitan ForeignKeys estables.** Una fila `Alarm` debe apuntar a un proyecto/inversor de forma permanente. Si solo guardáramos el ID externo como número suelto, no habría integridad referencial ni joins eficientes para el futuro frontend ("dame todas las alarmas del proyecto X").
@@ -218,30 +225,31 @@ Realidad: consultamos cada 5 min, pero el backend escribe con retraso (delay de 
 
 Para implementar exclusiones tipo "no clasificar como falla del inversor si hay comunicación caída": primero se evalúan reglas de **comunicación** (4, 8, 14), luego **calidad de datos** (11, 12, 13, 15), y por último las **eléctricas** (1, 2, 3, 5, 6, 7, 9, 10, 17, 18) — que consultan con `ctx.flag_active(...)` lo que dispararon las fases previas para excluirse. Ej.: regla 2 (inversor no disponible) no dispara si la 4 (comm lost) ya disparó para ese inversor.
 
-## Mapa alarma → endpoints (corregido, todos vía `/monitoring/`)
+## Mapa alarma → endpoints (corregido, todos vía `/solarview/`)
 
 | # | code | Dedup por | Endpoints |
 |---|---|---|---|
-| 1 | `project_no_generation` | proyecto | `/project/{id}/power/?total_power=1` (potencia AC + POA), `/project/{id}/relay/` (cerrado + tensiones), `/project/{id}/weather/` (meteo válida) |
-| 2 | `inverter_unavailable` | inversor | `/project/{id}/inverter/` (power≈0, state, time), `/project/{id}/measurements-dc/` (tensión DC `vs`), `/project/{id}/measurement/` (tensión AC), `/project/{id}/power/` (POA); comparables = demás inversores del mismo response |
-| 3 | `inverter_derating` | inversor | `/project/{id}/inverter/` (state, temperature>100°C, power vs comparables) |
-| 4 | `inverter_comm_lost` | inversor | `/project/{id}/inverter/` (campo `time` vs staleness calibrada) |
-| 5 | `string_zero_current` | string | `/project/{id}/measurements-dc/?variable=cs` (I≈0, otros >1A), `/project/{id}/inverter/` (activo) |
-| 6 | `string_low_current` | string | `/project/{id}/measurements-dc/?variable=cs` (<80% promedio mismo inversor), POA |
-| 7 | `dc_isolation_low` | inversor | `/project/{id}/inverter/` (`state` con código de aislamiento — verificar en sondeo) |
-| 8 | `meter_comm_lost` | proyecto | `/project/{id}/quoia_measurements_history/` SIN params (staleness) vs `/project/{id}/inverter/` (inversores sí reportan) |
-| 9 | `meter_no_increment` | proyecto | `/quoia_measurements_history/` SIN params (Σ energía por intervalo ≈0/60min), `/generation/` (inversores generando), POA |
-| 10 | `meter_inverter_mismatch` | proyecto | `/generation/` vs Σ intervalos de `/quoia_measurements_history/` por hora; >3% alerta, >5% alta |
+| 1 | `project_no_generation` | proyecto | `/measurements/power/?project_id={id}&total_power=1` (potencia AC + POA), `/config/recloser/?project_id={id}` (cerrado + tensiones), `/measurements/weather/?project_id={id}` (meteo válida) |
+| 2 | `inverter_unavailable` | inversor | `/measurements/inverters-list/?project_id={id}` (power≈0, state, time), `/measurements/dc/?project_id={id}` (tensión DC `vs`), `/measurements/ac/?project_id={id}` (tensión AC), `/measurements/power/?project_id={id}` (POA); comparables = demás inversores del mismo response |
+| 3 | `inverter_derating` | inversor | `/measurements/inverters-list/?project_id={id}` (state, temperature>100°C, power vs comparables) |
+| 4 | `inverter_comm_lost` | inversor | `/measurements/inverters-list/?project_id={id}` (campo `time` vs staleness calibrada) |
+| 5 | `string_zero_current` | string | `/measurements/dc/?project_id={id}&variable=cs` (I≈0, otros >1A), `/measurements/inverters-list/?project_id={id}` (activo) |
+| 6 | `string_low_current` | string | `/measurements/dc/?project_id={id}&variable=cs` (<80% promedio mismo inversor), POA |
+| 7 | `dc_isolation_low` | inversor | `/measurements/inverters-list/?project_id={id}` (`state` con código de aislamiento — verificar en sondeo) |
+| 8 | `meter_comm_lost` | proyecto | `/measurements/border/historical/?project_id={id}&init_date=...&end_date=...` (staleness) vs `/measurements/inverters-list/?project_id={id}` (inversores sí reportan) |
+| 9 | `meter_no_increment` | proyecto | `/measurements/border/historical/?project_id={id}&init_date=...&end_date=...` (Σ energía por intervalo ≈0/60min), `/measurements/generation/?project_id={id}` (inversores generando), POA |
+| 10 | `meter_inverter_mismatch` | proyecto | `/measurements/generation/?project_id={id}` vs Σ intervalos de `/measurements/border/historical/` por hora; calcula diferencia absoluta y la expone como porcentaje; >5% alerta, >10% alta |
 | 11 | `pr_inputs_missing` | proyecto | Derivada: presencia de energía AC (quoia), POA, P_DC (measurements-dc) y T_mod (`temperature_POA`) cuando el proyecto tiene estación. |
-| 12 | `availability_inputs_missing` | inversor | Derivada: POA válida + potencia/estado/timestamp de `/project/{id}/inverter/` |
-| 13 | `data_frozen` | proyecto/señal | Ventanas de `/power/` y `/weather/` (3 intervalos idénticos en horario solar; sin temperatura de módulo) |
-| 14 | `weather_comm_lost` | proyecto | `/project/{id}/weather/` (staleness calibrada por proyecto) |
-| 15 | `poa_invalid` | proyecto | `/weather/` (POA<0/inválida/congelada) cruzada con `/power/` (POA=0 con generación) |
-| 16 | `tmod_invalid` | proyecto | `/project/{id}/weather/` (`temperature_POA` nula/congelada/fuera de rango/incoherente vs ambiente con POA alta; solo horario solar; sin estación no aplica) |
-| 17 | `recloser_open` | proyecto | `/project/{id}/relay/` (abierto/trip en horario solar), `/relay/historical/`; programado vs disparo vía MaintenanceWindow |
-| 18 | `power_factor_low` | proyecto | `/project/{id}/relay/` (pf<0.95; gate de carga por CORRIENTE max(i_a/b/c) ≥ min_load_current_a — `relay.kw` nunca se usa; pf ÷100 si viene en %; pf=0 con carga = diagnóstico de firmware; solo horario solar; no aplica en autoconsumo) |
+| 12 | `availability_inputs_missing` | inversor | Derivada: POA válida + potencia/estado/timestamp de `/measurements/inverters-list/?project_id={id}` |
+| 13 | `data_frozen` | proyecto/señal | Ventanas de `/measurements/power/?project_id={id}` y `/measurements/weather/?project_id={id}` (3 intervalos idénticos en horario solar; sin temperatura de módulo) |
+| 14 | `weather_comm_lost` | proyecto | `/measurements/weather/?project_id={id}` (staleness calibrada por proyecto) |
+| 15 | `poa_invalid` | proyecto | `/measurements/weather/?project_id={id}` (POA<0/inválida/congelada) cruzada con `/measurements/power/?project_id={id}` (POA=0 con generación) |
+| 16 | `tmod_invalid` | proyecto | `/measurements/weather/?project_id={id}` (`temperature_POA` nula/congelada/fuera de rango/incoherente vs ambiente con POA alta; solo horario solar; sin estación no aplica) |
+| 17 | `recloser_open` | proyecto | `/config/recloser/?project_id={id}` (abierto/trip en horario solar), `/config/recloser/historical/?recloser={id}`; programado vs disparo vía MaintenanceWindow |
+| 18 | `power_factor_low` | proyecto | `/config/recloser/?project_id={id}` (pf<0.95; gate de carga por CORRIENTE max(i_a/b/c) ≥ min_load_current_a — `relay.kw` nunca se usa; pf ÷100 si viene en %; pf=0 con carga = diagnóstico de firmware; solo horario solar; no aplica en autoconsumo) |
 | 19 | `thd_abnormal` | — | Stub `enabled=False`: la API no expone THD |
 | 20 | `alarm_sla_breach` | alarma origen | Sin API externa: tabla `Alarm` local (ACTIVE sin ack > sla_ack_minutes) |
+| 21 | `recloser_comm_lost` | proyecto | `/config/recloser/?project_id={id}`: timestamp ausente o con antigüedad ≥5 min; severidad alta, vigilancia 24/7; no aplica si el proyecto no tiene reconectador asociado |
 
 ## Tareas Celery (pregunta 11 incluida)
 
@@ -260,7 +268,7 @@ Errores de API en `evaluate_project`: sin retry agresivo — el siguiente tick d
 
 ## Cliente SolarView (`integrations/solarview/`)
 
-- `requests.Session` + `Retry(429/502/503/504)`, timeout (5, 30). Base: `https://{SOLARSOLARVIEW_BASE_URL}/monitoring/...` (llave real del `.env`, sin esquema; settings acepta `SOLARVIEW_BASE_URL` como fallback). Auth con `static_token` desde `.env`.
+- `requests.Session` + `Retry(429/502/503/504)`, timeout (5, 30). Base: `https://{SOLARVIEW_BASE_URL}/solarview/...` (llave real del `.env`, sin esquema; settings acepta `SOLARVIEW_BASE_URL` como fallback). Auth con `static_token` desde `.env`.
 - Un método público por endpoint que valida el envelope (`success`, `error`) y devuelve dataclasses tipadas — las reglas nunca ven JSON crudo.
 - Excepciones: `SolarViewAPIError`, `SolarViewTimeout`, `SolarViewAuthError` (esta no reintenta).
 - **Sondeo primero (pregunta 10)**: antes de escribir el cliente definitivo, scripts de sondeo contra la API real (token cargado en runtime desde `.env`, nunca impreso ni pegado en el chat) que graban los responses reales como fixtures JSON. Con eso: se confirma formato de timestamps, cadencia real de weather/quoia por proyecto, códigos de `state` del inversor (¿distingue derating/aislamiento?), y estructura exacta de measurements-dc. Los fixtures alimentan los tests.
@@ -281,7 +289,7 @@ sección Post-COMPLETADO):
 
 - **T_mod definido** (T22): `temperature_POA` = temperatura del panel. Regla 16
   `tmod_invalid` implementada y habilitada (migración 0004); la regla 11 exige
-  T_mod cuando el proyecto tiene estación. 19/20 reglas activas (solo THD off).
+  T_mod cuando el proyecto tiene estación. Estado actual: 19/21 reglas activas.
 - **Gate de horario solar con margen** (T23): los inversores se "duermen" al
   ocaso y generaron una ola de ~193 falsas alarmas (`inverter_comm_lost`,
   `pr_inputs_missing`). Las reglas 4 y 12 solo evalúan dentro de
@@ -337,10 +345,10 @@ Cola de trabajo y memoria persistente entre iteraciones (el repo es la memoria: 
 ## Estado: EN PROGRESO
 - [ ] T01 Scaffolding: Django + settings + docker-compose + pyproject + pytest/ruff
 - [ ] T02 config/celery.py + colas + healthcheck
-- [ ] T03 SONDEO APIs reales: scripts que consultan /monitoring/ con static_token, graban
+- [ ] T03 SONDEO APIs reales: scripts que consultan /solarview/ con static_token, graban
       fixtures JSON reales, documentan cadencias weather/quoia y códigos de state. GATE:
       lo aprendido ajusta params por defecto y puede mover tareas a Bloqueadas.
-- [ ] T04 Cliente SolarView: base (/monitoring/, envelope, excepciones) + tests con fixtures reales
+- [ ] T04 Cliente SolarView: base (/solarview/, envelope, excepciones) + tests con fixtures reales
 - [ ] T05 Cliente SolarView: métodos por endpoint + schemas
 - [ ] T06 App plants: modelos + migraciones + admin
 - [ ] T07 plants.sync_catalog (primer task Celery e2e)
